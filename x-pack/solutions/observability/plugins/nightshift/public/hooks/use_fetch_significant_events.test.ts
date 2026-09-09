@@ -10,6 +10,7 @@ import type { QueryClient } from '@kbn/react-query';
 import type { SignificantEvent } from '@kbn/significant-events-schema';
 import { NIGHTSHIFT_LANDING_SEVERITIES } from '../common/constants';
 import {
+  addPendingInvestigationStartInCache,
   clearPendingInvestigationCompletionsForTests,
   markEventInvestigationCompleteInCache,
   NIGHTSHIFT_SIGNIFICANT_EVENTS_QUERY_KEY,
@@ -209,5 +210,63 @@ describe('markEventInvestigationCompleteInCache', () => {
     })) as NightshiftSignificantEventsQueryData;
 
     expect(data.hits[0].investigations?.[0].completed_at).toBe('2026-01-01T00:05:00.000Z');
+  });
+});
+
+describe('addPendingInvestigationStartInCache', () => {
+  beforeEach(() => {
+    clearPendingInvestigationCompletionsForTests();
+  });
+
+  it('appends a pending investigation and reapplies it after a refetch', async () => {
+    let cache: NightshiftSignificantEventsQueryData | undefined = {
+      hits: [mockEvent()],
+      page: 1,
+      perPage: 1,
+      total: 1,
+    };
+    const queryClient = {
+      setQueryData: jest.fn(
+        (
+          _queryKey: typeof NIGHTSHIFT_SIGNIFICANT_EVENTS_QUERY_KEY,
+          updater: (
+            current: NightshiftSignificantEventsQueryData | undefined
+          ) => NightshiftSignificantEventsQueryData | undefined
+        ) => {
+          cache = updater(cache);
+        }
+      ),
+    } as unknown as QueryClient;
+
+    addPendingInvestigationStartInCache(queryClient, 'evt-1', {
+      workflow_execution_id: 'exec-new',
+      started_at: '2026-01-01T00:01:00.000Z',
+    });
+
+    expect(cache?.hits[0].investigations).toEqual([
+      {
+        workflow_execution_id: 'exec-new',
+        started_at: '2026-01-01T00:01:00.000Z',
+      },
+    ]);
+
+    mockSignificantEventsFetch.mockResolvedValueOnce({
+      hits: [mockEvent({ event_uuid: 'evt-uuid-2' })],
+      page: 1,
+      perPage: 1,
+      total: 1,
+    });
+
+    renderHook(() => useFetchSignificantEvents());
+    const data = (await capturedQueryFn!({
+      signal: undefined,
+    })) as NightshiftSignificantEventsQueryData;
+
+    expect(data.hits[0].investigations).toEqual([
+      {
+        workflow_execution_id: 'exec-new',
+        started_at: '2026-01-01T00:01:00.000Z',
+      },
+    ]);
   });
 });

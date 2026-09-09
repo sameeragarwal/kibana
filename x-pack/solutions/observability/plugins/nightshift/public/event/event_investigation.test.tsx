@@ -87,7 +87,7 @@ const renderInvestigation = (
     <I18nProvider>
       <EuiProvider>
         <EventInvestigation
-          event={event}
+          title={event.title}
           investigation={investigation}
           status={status}
           state={state}

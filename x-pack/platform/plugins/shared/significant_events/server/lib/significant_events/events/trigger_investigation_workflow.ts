@@ -20,11 +20,14 @@ export const triggerInvestigationWorkflow = async ({
   request,
   logger,
   event,
+  message,
 }: {
   nightshiftInvestigations?: NightshiftInvestigationsServerStart;
   request: KibanaRequest;
   logger: Logger;
   event: SignificantEvent;
+  /** Caller-supplied brief. Falls back to the event title and summary when omitted. */
+  message?: string;
 }): Promise<string | undefined> => {
   if (!nightshiftInvestigations) {
     logger.debug('nightshiftInvestigations not available, skipping investigation trigger');
@@ -51,7 +54,7 @@ export const triggerInvestigationWorkflow = async ({
     const response = await client.start({
       subject: { type: 'significant_event', id: event_id, summary },
       trigger_type: 'manual',
-      message: `${title}\n\n${summary}`,
+      message: message?.trim() || `${title}\n\n${summary}`,
       stream_names: stream_names ?? [],
       concurrency_key: event_id,
       context: {

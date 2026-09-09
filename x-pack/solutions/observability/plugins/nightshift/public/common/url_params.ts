@@ -8,21 +8,45 @@
 /** Query param that restores the open event flyout on load or from a shared link. */
 export const NIGHTSHIFT_EVENT_ID_QUERY_PARAM = 'eventId';
 
+/** Query param that restores the open homepage investigation flyout. */
+export const NIGHTSHIFT_INVESTIGATION_ID_QUERY_PARAM = 'investigationId';
+
 export const IMPACTED_SERVICES_QUERY_PARAM = 'impactedServices';
 
 export const getNightshiftEventIdFromSearch = (search: string): string | undefined =>
   new URLSearchParams(search).get(NIGHTSHIFT_EVENT_ID_QUERY_PARAM) ?? undefined;
 
+export const getNightshiftInvestigationIdFromSearch = (search: string): string | undefined =>
+  new URLSearchParams(search).get(NIGHTSHIFT_INVESTIGATION_ID_QUERY_PARAM) ?? undefined;
+
 export const setNightshiftEventIdParam = (params: URLSearchParams, eventId: string): void => {
   params.set(NIGHTSHIFT_EVENT_ID_QUERY_PARAM, eventId);
+};
+
+export const setNightshiftInvestigationIdParam = (
+  params: URLSearchParams,
+  investigationId: string
+): void => {
+  params.set(NIGHTSHIFT_INVESTIGATION_ID_QUERY_PARAM, investigationId);
 };
 
 export const clearNightshiftEventIdParam = (params: URLSearchParams): void => {
   params.delete(NIGHTSHIFT_EVENT_ID_QUERY_PARAM);
 };
 
+export const clearNightshiftInvestigationIdParam = (params: URLSearchParams): void => {
+  params.delete(NIGHTSHIFT_INVESTIGATION_ID_QUERY_PARAM);
+};
+
 export const buildNightshiftEventFlyoutShareUrl = (eventId: string): string => {
   const url = new URL(window.location.href);
   url.searchParams.set(NIGHTSHIFT_EVENT_ID_QUERY_PARAM, eventId);
+  return url.toString();
+};
+
+export const buildNightshiftInvestigationFlyoutShareUrl = (investigationId: string): string => {
+  const url = new URL(window.location.href);
+  url.searchParams.set(NIGHTSHIFT_INVESTIGATION_ID_QUERY_PARAM, investigationId);
+  url.searchParams.delete(NIGHTSHIFT_EVENT_ID_QUERY_PARAM);
   return url.toString();
 };

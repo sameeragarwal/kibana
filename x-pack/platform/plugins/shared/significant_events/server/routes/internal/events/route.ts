@@ -12,6 +12,7 @@ import {
   CHANGE_POINT_TYPES,
   severitySchema,
   MAX_ID_LENGTH,
+  MAX_TEXT_LENGTH,
   triggerFeedbackSchema,
   type ChangePointType,
   type Detection,
@@ -284,6 +285,11 @@ const eventsTriggerInvestigationRoute = createServerRoute({
     path: z.object({
       id: z.string().max(255),
     }),
+    body: z
+      .object({
+        message: z.string().min(1).max(MAX_TEXT_LENGTH).optional(),
+      })
+      .optional(),
   }),
   handler: async ({
     params,
@@ -308,6 +314,7 @@ const eventsTriggerInvestigationRoute = createServerRoute({
       request,
       logger,
       event: hits[0],
+      message: params.body?.message,
     });
 
     if (!executionId) {

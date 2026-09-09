@@ -250,7 +250,7 @@ export function EventFlyout({ event, onClose }: EventFlyoutProps): React.ReactEl
         <EuiSpacer size="l" />
 
         <EventInvestigation
-          event={event}
+          title={event.title}
           investigation={availableInvestigation}
           status={investigationStatus}
           state={investigationState}

@@ -20,7 +20,6 @@ import { i18n } from '@kbn/i18n';
 import type { InvestigationStatus } from '@kbn/investigation-output';
 import type {
   InvestigationState,
-  SignificantEvent,
   SignificantEventInvestigation,
 } from '@kbn/significant-events-schema';
 import {
@@ -32,7 +31,7 @@ import { isInvestigationInvestigated } from '../common/investigation_progress_st
 import { NIGHTSHIFT_EBT_ACTIONS, NIGHTSHIFT_EBT_ELEMENTS } from '../common/ebt_constants';
 
 export interface EventInvestigationProps {
-  event: SignificantEvent;
+  title: string;
   investigation?: SignificantEventInvestigation;
   status: InvestigationStatus;
   state?: InvestigationState;
@@ -41,7 +40,7 @@ export interface EventInvestigationProps {
 }
 
 export function EventInvestigation({
-  event,
+  title,
   investigation,
   status,
   state,
@@ -124,7 +123,7 @@ export function EventInvestigation({
         </EuiCallOut>
       ) : (
         <InvestigationSummaryCard
-          eventTitle={event.title}
+          eventTitle={title}
           status={status}
           state={state}
           error={error}
@@ -136,7 +135,7 @@ export function EventInvestigation({
 
       {isFlyoutOpen && canOpenInvestigationFlyout && investigation && (
         <InvestigationFlyout
-          eventTitle={event.title}
+          eventTitle={title}
           investigation={investigation}
           status={status}
           state={state}

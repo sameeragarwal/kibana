@@ -8,6 +8,7 @@
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import React from 'react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
+import { EuiProvider } from '@elastic/eui';
 import { usePageReady } from '@kbn/ebt-tools';
 import { I18nProvider } from '@kbn/i18n-react';
 import type { SignificantEvent } from '@kbn/significant-events-schema';
@@ -16,12 +17,14 @@ import { useFetchEventById } from '../hooks/use_fetch_event_by_id';
 import { useFetchSignificantEvents } from '../hooks/use_fetch_significant_events';
 import { useFetchInvestigationStatuses } from '../hooks/use_fetch_investigation_statuses';
 import { useCloseSignificantEvent } from '../hooks/use_close_significant_event';
+import { useStartEventInvestigation } from '../hooks/use_start_event_investigation';
 import { useKibana } from '../hooks/use_kibana';
 
 jest.mock('../hooks/use_fetch_event_by_id');
 jest.mock('../hooks/use_fetch_significant_events');
 jest.mock('../hooks/use_fetch_investigation_statuses');
 jest.mock('../hooks/use_close_significant_event');
+jest.mock('../hooks/use_start_event_investigation');
 jest.mock('../hooks/use_kibana');
 jest.mock('@kbn/ebt-tools');
 
@@ -37,10 +40,28 @@ jest.mock('../event/event_flyout', () => ({
   ),
 }));
 
+jest.mock('../landing/homepage_investigation_flyout', () => ({
+  HomepageInvestigationFlyout: ({
+    investigationId,
+    onClose,
+  }: {
+    investigationId: string;
+    onClose: () => void;
+  }) => (
+    <div data-test-subj="stubHomepageInvestigationFlyout">
+      <span>{`Investigation: ${investigationId}`}</span>
+      <button data-test-subj="stubHomepageInvestigationFlyoutClose" onClick={onClose}>
+        Close
+      </button>
+    </div>
+  ),
+}));
+
 const mockUseFetchEventById = useFetchEventById as jest.Mock;
 const mockUseFetchSignificantEvents = useFetchSignificantEvents as jest.Mock;
 const mockUseFetchInvestigationStatuses = useFetchInvestigationStatuses as jest.Mock;
 const mockUseCloseSignificantEvent = useCloseSignificantEvent as jest.Mock;
+const mockUseStartEventInvestigation = useStartEventInvestigation as jest.Mock;
 const mockUseKibana = useKibana as jest.Mock;
 const mockUsePageReady = usePageReady as jest.Mock;
 
@@ -53,6 +74,7 @@ const impactedService = (name: string, streamName = 'logs.app') => ({
 });
 
 const openChat = jest.fn();
+const startEventInvestigation = jest.fn();
 const scrollIntoView = jest.fn();
 const OriginalMutationObserver = global.MutationObserver;
 
@@ -114,7 +136,9 @@ function renderWithIntl(
 ) {
   return render(
     <I18nProvider>
-      <MemoryRouter initialEntries={initialEntries}>{ui}</MemoryRouter>
+      <EuiProvider>
+        <MemoryRouter initialEntries={initialEntries}>{ui}</MemoryRouter>
+      </EuiProvider>
     </I18nProvider>
   );
 }
@@ -138,11 +162,21 @@ describe('NightshiftApp', () => {
 
   beforeEach(() => {
     openChat.mockClear();
+    startEventInvestigation.mockClear();
     mockUsePageReady.mockClear();
     mockUseCloseSignificantEvent.mockReturnValue({
       closeSignificantEvent: jest.fn(),
       closingEventUuid: undefined,
     });
+    mockUseStartEventInvestigation.mockImplementation(
+      (args?: { onStarted?: (investigationId: string) => void }) => ({
+        startEventInvestigation: (message: string) => {
+          startEventInvestigation(message);
+          args?.onStarted?.('homepage-exec-1');
+        },
+        isStartingInvestigation: false,
+      })
+    );
     scrollIntoView.mockClear();
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,
@@ -217,6 +251,7 @@ describe('NightshiftApp', () => {
     expect(screen.queryByText('Some significant events need action')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Need action:/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Resolved:/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('nightshiftHomepagePrompt')).not.toBeInTheDocument();
   });
 
   it('animates from the loading state into the populated landing page', () => {
@@ -226,9 +261,11 @@ describe('NightshiftApp', () => {
     setEvents({ events: [mockEvent()] });
     rerender(
       <I18nProvider>
-        <MemoryRouter>
-          <NightshiftApp />
-        </MemoryRouter>
+        <EuiProvider>
+          <MemoryRouter>
+            <NightshiftApp />
+          </MemoryRouter>
+        </EuiProvider>
       </I18nProvider>
     );
 
@@ -676,9 +713,11 @@ describe('NightshiftApp', () => {
     });
     rerender(
       <I18nProvider>
-        <MemoryRouter initialEntries={['/?eventId=evt-1']}>
-          <NightshiftApp />
-        </MemoryRouter>
+        <EuiProvider>
+          <MemoryRouter initialEntries={['/?eventId=evt-1']}>
+            <NightshiftApp />
+          </MemoryRouter>
+        </EuiProvider>
       </I18nProvider>
     );
 
@@ -719,5 +758,79 @@ describe('NightshiftApp', () => {
     ).map((chip) => chip.getAttribute('aria-label'));
 
     expect(chipLabels).toEqual(['busy: 3', 'critical: 1']);
+  });
+
+  it('renders the homepage prompt on the populated landing page', () => {
+    setEvents({ events: [mockEvent({ title: 'Checkout latency' })] });
+    renderWithIntl();
+
+    expect(screen.getByTestId('nightshiftHomepagePrompt')).toBeInTheDocument();
+    expect(screen.queryByText('Investigating Checkout latency')).not.toBeInTheDocument();
+  });
+
+  it('renders the homepage prompt on the empty landing page', () => {
+    setEvents({ events: [] });
+    renderWithIntl();
+
+    expect(screen.getByTestId('nightshiftHomepagePrompt')).toBeInTheDocument();
+    expect(screen.queryByText('Investigations need a significant event.')).not.toBeInTheDocument();
+  });
+
+  it('starts an investigation from the typed message and opens its flyout', () => {
+    const highEvent = mockEvent({
+      event_id: 'high',
+      event_uuid: 'high-uuid',
+      severity: '60-high',
+      title: 'Inventory errors',
+    });
+    const criticalEvent = mockEvent({
+      event_id: 'critical',
+      event_uuid: 'critical-uuid',
+      title: 'Checkout latency',
+    });
+    setEvents({ events: [highEvent, criticalEvent] });
+    renderWithIntl(
+      <>
+        <NightshiftApp />
+        <LocationProbe />
+      </>
+    );
+
+    fireEvent.change(screen.getByTestId('nightshiftHomepagePromptInput'), {
+      target: { value: 'Why did payment timeouts increase?' },
+    });
+    fireEvent.click(screen.getByTestId('nightshiftHomepagePromptSubmitButton'));
+
+    expect(startEventInvestigation).toHaveBeenCalledWith('Why did payment timeouts increase?');
+    expect(openChat).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('stubEventFlyout')).not.toBeInTheDocument();
+    expect(screen.getByText('Investigation: homepage-exec-1')).toBeInTheDocument();
+    expect(screen.getByTestId('locationProbe')).toHaveTextContent(
+      'investigationId=homepage-exec-1'
+    );
+  });
+
+  it('restores the homepage investigation flyout from the investigationId URL parameter', () => {
+    setEvents({ events: [mockEvent()] });
+    renderWithIntl(<NightshiftApp />, { initialEntries: ['/?investigationId=homepage-exec-1'] });
+
+    expect(screen.getByText('Investigation: homepage-exec-1')).toBeInTheDocument();
+    expect(screen.queryByTestId('stubEventFlyout')).not.toBeInTheDocument();
+  });
+
+  it('closes the homepage investigation flyout and clears the URL', () => {
+    setEvents({ events: [mockEvent()] });
+    renderWithIntl(
+      <>
+        <NightshiftApp />
+        <LocationProbe />
+      </>,
+      { initialEntries: ['/?investigationId=homepage-exec-1'] }
+    );
+
+    fireEvent.click(screen.getByTestId('stubHomepageInvestigationFlyoutClose'));
+
+    expect(screen.queryByTestId('stubHomepageInvestigationFlyout')).not.toBeInTheDocument();
+    expect(screen.getByTestId('locationProbe')).not.toHaveTextContent('investigationId=');
   });
 });

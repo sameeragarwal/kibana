@@ -33,11 +33,14 @@ import { useFetchEventById } from '../hooks/use_fetch_event_by_id';
 import { useFetchSignificantEvents } from '../hooks/use_fetch_significant_events';
 import { useFetchInvestigationStatuses } from '../hooks/use_fetch_investigation_statuses';
 import { useCloseSignificantEvent } from '../hooks/use_close_significant_event';
+import { useStartEventInvestigation } from '../hooks/use_start_event_investigation';
 import {
   buildImpactedServiceChips,
   filterEventsByImpactedServiceChip,
 } from '../landing/impacted_services_chips';
 import { ImpactedServices } from '../landing/impacted_services';
+import { HomepagePrompt } from '../landing/homepage_prompt';
+import { HomepageInvestigationFlyout } from '../landing/homepage_investigation_flyout';
 import { SignificantEventList } from '../landing/significant_event_list';
 import { SignificantEventStatuses } from '../landing/significant_event_statuses';
 import { EventFlyout } from '../event/event_flyout';
@@ -45,9 +48,12 @@ import { NightshiftHeader } from './header';
 import { NightshiftEmptyState } from './empty_state';
 import {
   clearNightshiftEventIdParam,
+  clearNightshiftInvestigationIdParam,
   getNightshiftEventIdFromSearch,
+  getNightshiftInvestigationIdFromSearch,
   IMPACTED_SERVICES_QUERY_PARAM,
   setNightshiftEventIdParam,
+  setNightshiftInvestigationIdParam,
 } from '../common/url_params';
 
 const COMPACT_APP_HEADER_HEIGHT_PX = 48;
@@ -103,6 +109,10 @@ export function NightshiftApp(): React.ReactElement {
   );
   const { data: investigationStatuses } = useFetchInvestigationStatuses(investigationExecutionIds);
   const selectedEventIdFromUrl = useMemo(() => getNightshiftEventIdFromSearch(search), [search]);
+  const selectedInvestigationIdFromUrl = useMemo(
+    () => getNightshiftInvestigationIdFromSearch(search),
+    [search]
+  );
 
   // Derived from the freshest fetched list (not a click-time snapshot), so
   // background refetches keep the open flyout current.
@@ -116,6 +126,7 @@ export function NightshiftApp(): React.ReactElement {
   const selectedEvent = eventFromList ?? eventByIdQuery.data;
 
   const [notFoundEventId, setNotFoundEventId] = useState<string>();
+  const [notFoundInvestigationId, setNotFoundInvestigationId] = useState<string>();
 
   useEffect(() => {
     if (!selectedEventIdFromUrl || isLoading) {
@@ -162,18 +173,50 @@ export function NightshiftApp(): React.ReactElement {
   const handleEventClick = useCallback(
     (event: SignificantEvent) => {
       setNotFoundEventId(undefined);
+      setNotFoundInvestigationId(undefined);
       const params = new URLSearchParams(history.location.search);
+      clearNightshiftInvestigationIdParam(params);
       setNightshiftEventIdParam(params, event.event_id);
       history.replace({ search: params.toString() });
     },
     [history]
   );
 
+  const handleHomepageInvestigateStarted = useCallback(
+    (investigationId: string) => {
+      setNotFoundInvestigationId(undefined);
+      const params = new URLSearchParams(history.location.search);
+      clearNightshiftEventIdParam(params);
+      setNightshiftInvestigationIdParam(params, investigationId);
+      history.replace({ search: params.toString() });
+    },
+    [history]
+  );
+  const { startEventInvestigation, isStartingInvestigation } = useStartEventInvestigation({
+    onStarted: handleHomepageInvestigateStarted,
+  });
+
   const handleFlyoutClose = useCallback(() => {
     const params = new URLSearchParams(history.location.search);
     clearNightshiftEventIdParam(params);
     history.replace({ search: params.toString() });
   }, [history]);
+
+  const handleInvestigationFlyoutClose = useCallback(() => {
+    const params = new URLSearchParams(history.location.search);
+    clearNightshiftInvestigationIdParam(params);
+    history.replace({ search: params.toString() });
+  }, [history]);
+
+  const handleInvestigationNotFound = useCallback(
+    (investigationId: string) => {
+      setNotFoundInvestigationId(investigationId);
+      const params = new URLSearchParams(history.location.search);
+      clearNightshiftInvestigationIdParam(params);
+      history.replace({ search: params.toString() });
+    },
+    [history]
+  );
 
   // Highest-severity events first so critical items are never buried below older, lower-impact ones.
   const needsActionEvents = useMemo(
@@ -239,6 +282,12 @@ export function NightshiftApp(): React.ReactElement {
   const hasEvents = shownEvents.length > 0;
   const hasNeedsAction = needsActionEvents.length > 0;
   const showCenteredEmptyLayout = isLoading || !hasEvents;
+  const homepagePrompt = !isLoading ? (
+    <HomepagePrompt
+      isSubmitting={isStartingInvestigation}
+      onInvestigate={startEventInvestigation}
+    />
+  ) : null;
   const contentTopMargin =
     showCenteredEmptyLayout && !isLoading ? euiTheme.size.m : euiTheme.size.l;
   const constrainContentToViewport = showCenteredEmptyLayout || isTransitioningFromLoading;
@@ -333,6 +382,32 @@ export function NightshiftApp(): React.ReactElement {
     </div>
   ) : null;
 
+  const investigationNotFoundCallout = notFoundInvestigationId ? (
+    <div
+      css={css`
+        margin-top: ${euiTheme.size.m};
+        width: 100%;
+      `}
+    >
+      <EuiCallOut
+        announceOnMount
+        color="warning"
+        iconType="warning"
+        size="s"
+        title={i18n.translate('xpack.nightshift.investigationNotFoundTitle', {
+          defaultMessage: 'Investigation {investigationId} not found',
+          values: { investigationId: notFoundInvestigationId },
+        })}
+      >
+        <EuiText size="s">
+          {i18n.translate('xpack.nightshift.investigationNotFoundDescription', {
+            defaultMessage: 'This investigation could not be loaded. The URL has been cleared.',
+          })}
+        </EuiText>
+      </EuiCallOut>
+    </div>
+  ) : null;
+
   // Only treat a load failure as fatal when there is nothing to show; a failed
   // background refetch that still has cached data degrades to a non-blocking warning.
   if (eventsError && !hasEvents && !isLoading) {
@@ -366,9 +441,12 @@ export function NightshiftApp(): React.ReactElement {
         showAllEventsHref={hasEvents ? showAllEventsHref : undefined}
       />
 
+      {homepagePrompt}
+
       {showCenteredEmptyLayout ? (
         <>
           {eventNotFoundCallout}
+          {investigationNotFoundCallout}
           <NightshiftEmptyState isProcessing={isLoading} logsHref={emptyStateLogsHref} />
         </>
       ) : (
@@ -421,6 +499,7 @@ export function NightshiftApp(): React.ReactElement {
           )}
 
           {eventNotFoundCallout}
+          {investigationNotFoundCallout}
 
           <SignificantEventStatuses
             needsActionCount={needsActionEvents.length}
@@ -517,6 +596,15 @@ export function NightshiftApp(): React.ReactElement {
           key={selectedEvent.event_id}
           event={selectedEvent}
           onClose={handleFlyoutClose}
+        />
+      )}
+
+      {selectedInvestigationIdFromUrl && (
+        <HomepageInvestigationFlyout
+          key={selectedInvestigationIdFromUrl}
+          investigationId={selectedInvestigationIdFromUrl}
+          onClose={handleInvestigationFlyoutClose}
+          onNotFound={handleInvestigationNotFound}
         />
       )}
     </EuiFlexGroup>

@@ -20,6 +20,10 @@ import {
   OBSERVABILITY_GET_SERVICES_TOOL_ID,
   OBSERVABILITY_GET_TRACES_TOOL_ID,
 } from './discovery_tool_ids';
+import { SANDBOX_BASH_TOOL_ID } from '../../tools/sandbox_bash/tool';
+import { SANDBOX_VIEW_FILE_TOOL_ID } from '../../tools/sandbox_bash/view_file_tool';
+import { SANDBOX_STR_REPLACE_TOOL_ID } from '../../tools/sandbox_bash/str_replace_tool';
+import { SANDBOX_WRITE_FILE_TOOL_ID } from '../../tools/sandbox_bash/write_file_tool';
 
 export const SIGNIFICANT_EVENTS_INVESTIGATION_AGENT_ID = 'significant-events.investigation';
 export const SIGNIFICANT_EVENTS_INVESTIGATION_AGENT_TYPE_ID =
@@ -60,6 +64,14 @@ export const getInvestigationAgentType = ({
           OBSERVABILITY_GET_METRIC_CHANGE_POINTS_TOOL_ID,
           OBSERVABILITY_GET_SERVICES_TOOL_ID,
           OBSERVABILITY_GET_TRACES_TOOL_ID,
+          ...(sandboxEnabled
+            ? [
+                SANDBOX_BASH_TOOL_ID,
+                SANDBOX_VIEW_FILE_TOOL_ID,
+                SANDBOX_STR_REPLACE_TOOL_ID,
+                SANDBOX_WRITE_FILE_TOOL_ID,
+              ]
+            : []),
         ],
       },
     ],

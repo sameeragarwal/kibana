@@ -8,7 +8,10 @@
 import moment from 'moment';
 import { useQuery, type QueryClient, type UseQueryResult } from '@kbn/react-query';
 import type { SignificantEventsRepositoryClient } from '@kbn/significant-events-plugin/public';
-import type { SignificantEvent } from '@kbn/significant-events-schema';
+import type {
+  SignificantEvent,
+  SignificantEventInvestigation,
+} from '@kbn/significant-events-schema';
 import { useKibana } from './use_kibana';
 import { NIGHTSHIFT_LANDING_SEVERITIES } from '../common/constants';
 import { hasRunningInvestigations } from '../event/significant_event_status';
@@ -36,12 +39,14 @@ const NIGHTSHIFT_LOOKBACK_DAYS = 30;
 const MAX_FETCH_PAGES = 10;
 
 const pendingInvestigationCompletions = new Map<string, string>();
+const pendingInvestigationStarts = new Map<string, SignificantEventInvestigation>();
 
 const pendingInvestigationCompletionKey = (eventId: string, workflowExecutionId: string): string =>
   `${eventId}:${workflowExecutionId}`;
 
 export const clearPendingInvestigationCompletionsForTests = (): void => {
   pendingInvestigationCompletions.clear();
+  pendingInvestigationStarts.clear();
 };
 
 const applyPendingInvestigationCompletions = (hits: SignificantEvent[]): SignificantEvent[] => {
@@ -79,6 +84,35 @@ const applyPendingInvestigationCompletions = (hits: SignificantEvent[]): Signifi
 
     changed = true;
     return { ...hit, investigations: nextInvestigations };
+  });
+
+  return changed ? nextHits : hits;
+};
+
+const applyPendingInvestigationStarts = (hits: SignificantEvent[]): SignificantEvent[] => {
+  if (pendingInvestigationStarts.size === 0) {
+    return hits;
+  }
+
+  let changed = false;
+  const nextHits = hits.map((hit) => {
+    const pending = pendingInvestigationStarts.get(hit.event_id);
+    if (!pending) {
+      return hit;
+    }
+
+    const investigations = hit.investigations ?? [];
+    if (
+      investigations.some(
+        (investigation) => investigation.workflow_execution_id === pending.workflow_execution_id
+      )
+    ) {
+      pendingInvestigationStarts.delete(hit.event_id);
+      return hit;
+    }
+
+    changed = true;
+    return { ...hit, investigations: [...investigations, pending] };
   });
 
   return changed ? nextHits : hits;
@@ -127,7 +161,7 @@ const fetchSignificantEvents = async ({
   }
 
   return {
-    hits: applyPendingInvestigationCompletions(allHits),
+    hits: applyPendingInvestigationStarts(applyPendingInvestigationCompletions(allHits)),
     page: 1,
     perPage: allHits.length,
     total,
@@ -155,6 +189,44 @@ export const useFetchSignificantEvents = (): UseQueryResult<
         ? RUNNING_INVESTIGATIONS_REFETCH_INTERVAL_MS
         : false,
   });
+};
+
+export const addPendingInvestigationStartInCache = (
+  queryClient: QueryClient,
+  eventId: string,
+  investigation: SignificantEventInvestigation
+): void => {
+  pendingInvestigationStarts.set(eventId, investigation);
+
+  queryClient.setQueryData<NightshiftSignificantEventsQueryData>(
+    NIGHTSHIFT_SIGNIFICANT_EVENTS_QUERY_KEY,
+    (current) => {
+      if (!current) {
+        return current;
+      }
+
+      let changed = false;
+      const hits = current.hits.map((hit) => {
+        if (hit.event_id !== eventId) {
+          return hit;
+        }
+
+        const investigations = hit.investigations ?? [];
+        if (
+          investigations.some(
+            (existing) => existing.workflow_execution_id === investigation.workflow_execution_id
+          )
+        ) {
+          return hit;
+        }
+
+        changed = true;
+        return { ...hit, investigations: [...investigations, investigation] };
+      });
+
+      return changed ? { ...current, hits } : current;
+    }
+  );
 };
 
 export const markEventInvestigationCompleteInCache = (

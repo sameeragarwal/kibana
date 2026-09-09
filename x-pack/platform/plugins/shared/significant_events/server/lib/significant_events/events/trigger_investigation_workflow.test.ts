@@ -61,6 +61,21 @@ describe('triggerInvestigationWorkflow', () => {
     expect(nightshiftInvestigations.getInvestigationsClient).toHaveBeenCalledTimes(1);
   });
 
+  it('uses a caller-supplied message when provided', async () => {
+    const nightshiftInvestigations = createNightshiftInvestigations();
+
+    await triggerInvestigationWorkflow({
+      nightshiftInvestigations,
+      request: createRequest(),
+      logger: createLogger(),
+      event: createEvent(),
+      message: 'Why did checkout latency spike after the deploy?',
+    });
+
+    const [request] = getStartMock(nightshiftInvestigations).mock.calls[0];
+    expect(request.message).toBe('Why did checkout latency spike after the deploy?');
+  });
+
   it('builds the message from event title and summary', async () => {
     const event = createEvent({
       title: 'High error rate',

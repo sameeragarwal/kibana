@@ -19,6 +19,10 @@ const subjectIdAndSummary = {
   summary: z.string().max(MAX_TEXT_LENGTH).optional(),
 };
 
+const startInvestigationMessage = {
+  message: z.string().min(1).max(MAX_TEXT_LENGTH).optional(),
+};
+
 export const startInvestigationRoute = createNightshiftInvestigationsServerRoute({
   endpoint: 'POST /internal/nightshift/investigations',
   options: {
@@ -50,6 +54,7 @@ export const startInvestigationRoute = createNightshiftInvestigationsServerRoute
           ...subjectIdAndSummary,
         }),
         concurrency_key: z.string().max(MAX_KEYWORD_LENGTH).optional(),
+        ...startInvestigationMessage,
       }),
       z.object({
         subject: z.object({
@@ -58,6 +63,7 @@ export const startInvestigationRoute = createNightshiftInvestigationsServerRoute
         }),
         concurrency_key: z.string().max(MAX_KEYWORD_LENGTH).optional(),
         context: freeFormContextSchema.optional(),
+        ...startInvestigationMessage,
       }),
     ]),
   }),
@@ -79,6 +85,7 @@ export const startInvestigationRoute = createNightshiftInvestigationsServerRoute
             concurrency_key: body.concurrency_key ?? snapshot.id,
             context: { alerts: [snapshot] },
             trigger_type: 'manual',
+            message: body.message,
           });
         }
         case 'significant_event':

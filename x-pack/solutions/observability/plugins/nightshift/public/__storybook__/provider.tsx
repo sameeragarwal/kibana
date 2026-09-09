@@ -159,6 +159,10 @@ const createServices = ({
       }
 
       const eventUuid = options?.params?.path?.id;
+      if (route === 'POST /internal/significant_events/events/{id}/investigate') {
+        return { executionId: 'storybook-investigation-exec' };
+      }
+
       if (route === 'POST /internal/significant_events/events/{id}/update' && eventUuid) {
         closedEventUuids.add(eventUuid);
         return {
@@ -228,6 +232,28 @@ const createServices = ({
     http: {
       basePath: {
         prepend: (path: string) => path,
+      },
+      get: async (path: string) => {
+        if (path.startsWith('/internal/nightshift/investigations/')) {
+          return {
+            investigation_id: 'storybook-investigation-exec',
+            status: 'running',
+            created_at: '2026-09-04T22:06:55.578Z',
+            started_at: '2026-09-04T22:06:56.114Z',
+            subject: {
+              type: 'significant_event',
+              id: 'homepage-prompt',
+              summary: 'Why did payment timeouts increase?',
+            },
+          };
+        }
+        throw new Error(`Unhandled storybook GET ${path}`);
+      },
+      post: async (path: string) => {
+        if (path === '/internal/nightshift/investigations') {
+          return { investigation_id: 'storybook-investigation-exec' };
+        }
+        throw new Error(`Unhandled storybook POST ${path}`);
       },
     },
     lens: {
