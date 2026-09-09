@@ -7,10 +7,13 @@
 
 import type { KibanaRequest, Logger } from '@kbn/core/server';
 import { ExecutionStatus } from '@kbn/workflows';
-import { SIGNIFICANT_EVENTS_INVESTIGATION_WORKFLOW_ID } from '@kbn/workflows/managed';
+import {
+  DEDUCTIVE_INVESTIGATION_WORKFLOW_ID,
+  SIGNIFICANT_EVENTS_INVESTIGATION_WORKFLOW_ID,
+} from '@kbn/workflows/managed';
 import type { WorkflowsServerPluginSetup } from '@kbn/workflows-management-plugin/server';
 import type { AgentBuilderPluginStart } from '@kbn/agent-builder-server';
-import type { InvestigationStatus } from '../../common';
+import { HOMEPAGE_INVESTIGATION_SUBJECT_ID, type InvestigationStatus } from '../../common';
 import { freeFormContextSchema } from '../../common/schemas';
 import { installInvestigationAgent } from '../lib/install_investigation_agent';
 import type {
@@ -395,6 +398,45 @@ describe('NightshiftInvestigationsClient.start()', () => {
       'nightshift-investigations'
     );
     expect(result).toEqual({ investigation_id: 'exec-123' });
+  });
+
+  it('starts homepage prompt runs on the deductive investigation workflow', async () => {
+    const homepageWorkflow = {
+      id: DEDUCTIVE_INVESTIGATION_WORKFLOW_ID,
+      enabled: true,
+      valid: true,
+      definition: { steps: [] },
+    };
+    mockManagement.getWorkflow.mockResolvedValue(homepageWorkflow);
+    mockManagement.runWorkflow.mockResolvedValue('exec-homepage');
+
+    const result = await makeClient().start({
+      subject: {
+        type: 'significant_event',
+        id: HOMEPAGE_INVESTIGATION_SUBJECT_ID,
+        summary: 'Why did payment timeouts increase?',
+      },
+      message: 'Why did payment timeouts increase?',
+    });
+
+    expect(mockManagement.getWorkflow).toHaveBeenCalledWith(
+      DEDUCTIVE_INVESTIGATION_WORKFLOW_ID,
+      SPACE_ID
+    );
+    expect(mockManagement.runWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({ id: DEDUCTIVE_INVESTIGATION_WORKFLOW_ID }),
+      SPACE_ID,
+      expect.objectContaining({
+        message: expect.any(String),
+        context: expect.objectContaining({
+          source: 'significant_event',
+          significant_event_id: HOMEPAGE_INVESTIGATION_SUBJECT_ID,
+        }),
+      }),
+      expect.anything(),
+      'nightshift-investigations'
+    );
+    expect(result).toEqual({ investigation_id: 'exec-homepage' });
   });
 
   it('persists an explicit trigger_type into the workflow context', async () => {
@@ -1006,6 +1048,36 @@ describe('NightshiftInvestigationsClient.ensureOrCreate()', () => {
       InvestigationNotFoundError
     );
     expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  it('accepts a homepage execution of the deductive investigation workflow', async () => {
+    mockManagement.getWorkflowExecution.mockResolvedValue(
+      makeEnsureExecution({
+        workflowId: DEDUCTIVE_INVESTIGATION_WORKFLOW_ID,
+        originManagedWorkflowId: DEDUCTIVE_INVESTIGATION_WORKFLOW_ID,
+        context: {
+          inputs: {
+            message: 'Investigate last error',
+            context: {
+              source: 'significant_event',
+              significant_event_id: HOMEPAGE_INVESTIGATION_SUBJECT_ID,
+              trigger_type: 'manual',
+            },
+          },
+        },
+      })
+    );
+
+    await expect(makeClient().ensureOrCreate(EXECUTION_ID)).resolves.toBeUndefined();
+    expect(repository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: EXECUTION_ID,
+        attributes: expect.objectContaining({
+          subject_type: 'significant_event',
+          subject_id: HOMEPAGE_INVESTIGATION_SUBJECT_ID,
+        }),
+      })
+    );
   });
 
   it('throws InvestigationNotFoundError for an execution of an unrelated workflow', async () => {

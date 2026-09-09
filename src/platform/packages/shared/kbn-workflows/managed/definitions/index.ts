@@ -17,6 +17,7 @@ import {
   ATTACK_DISCOVERY_SKILL_REPORT_WORKFLOW,
   ATTACK_DISCOVERY_VALIDATE_WORKFLOW,
 } from './discoveries';
+import { DEDUCTIVE_INVESTIGATION_WORKFLOW } from './nightshift_investigations/deductive_investigation';
 import { SIGNIFICANT_EVENTS_INVESTIGATION_WORKFLOW } from './nightshift_investigations/investigation';
 import { SIGNIFICANT_EVENTS_SANDBOX_SEED_WORKFLOW } from './nightshift_investigations/sandbox_seed';
 import {
@@ -94,6 +95,7 @@ export {
   SIGNIFICANT_EVENTS_SCHEDULED_DETECTION_WORKFLOW_ID,
   SIGNIFICANT_EVENTS_SCHEDULED_REVIEW_WORKFLOW_ID,
 } from './significant_events';
+export { DEDUCTIVE_INVESTIGATION_WORKFLOW_ID } from './nightshift_investigations/deductive_investigation';
 export { SIGNIFICANT_EVENTS_INVESTIGATION_WORKFLOW_ID } from './nightshift_investigations/investigation';
 export { SIGNIFICANT_EVENTS_SANDBOX_SEED_WORKFLOW_ID } from './nightshift_investigations/sandbox_seed';
 export {
@@ -148,6 +150,7 @@ export const managedWorkflowDefinitions = [
   SIGNIFICANT_EVENTS_DISCOVERY_WORKFLOW,
   SIGNIFICANT_EVENTS_INVESTIGATION_COMPLETED_WORKFLOW,
   SIGNIFICANT_EVENTS_ORCHESTRATOR_WORKFLOW,
+  DEDUCTIVE_INVESTIGATION_WORKFLOW,
   SIGNIFICANT_EVENTS_INVESTIGATION_WORKFLOW,
   SIGNIFICANT_EVENTS_SANDBOX_SEED_WORKFLOW,
   SIGNIFICANT_EVENTS_SCHEDULED_DETECTION_WORKFLOW,

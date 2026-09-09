@@ -89,6 +89,9 @@ export interface StartInvestigationResponse {
 /** Bound for investigation ids, concurrency keys, and other keyword-sized strings. */
 export const MAX_KEYWORD_LENGTH = 500;
 
+/** Synthetic subject so homepage prompt runs persist without binding to an event. */
+export const HOMEPAGE_INVESTIGATION_SUBJECT_ID = 'homepage-prompt';
+
 export const INVESTIGATION_STATUSES = [
   'pending',
   'running',
