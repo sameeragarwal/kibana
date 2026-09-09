@@ -7,3 +7,6 @@
 
 /** Severity filters for the Nightshift landing page event list. */
 export const NIGHTSHIFT_LANDING_SEVERITIES = ['80-critical', '60-high'] as const;
+
+/** Synthetic subject so homepage prompt runs persist without binding to an event. */
+export const HOMEPAGE_INVESTIGATION_SUBJECT_ID = 'homepage-prompt';

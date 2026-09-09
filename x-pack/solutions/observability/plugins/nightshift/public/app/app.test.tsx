@@ -17,13 +17,16 @@ import { useFetchEventById } from '../hooks/use_fetch_event_by_id';
 import { useFetchSignificantEvents } from '../hooks/use_fetch_significant_events';
 import { useFetchInvestigationStatuses } from '../hooks/use_fetch_investigation_statuses';
 import { useCloseSignificantEvent } from '../hooks/use_close_significant_event';
+import { useFetchHomepageInvestigations } from '../hooks/use_fetch_homepage_investigations';
 import { useStartEventInvestigation } from '../hooks/use_start_event_investigation';
 import { useKibana } from '../hooks/use_kibana';
+import type { HomepageInvestigationRecord } from '../hooks/use_fetch_investigation';
 
 jest.mock('../hooks/use_fetch_event_by_id');
 jest.mock('../hooks/use_fetch_significant_events');
 jest.mock('../hooks/use_fetch_investigation_statuses');
 jest.mock('../hooks/use_close_significant_event');
+jest.mock('../hooks/use_fetch_homepage_investigations');
 jest.mock('../hooks/use_start_event_investigation');
 jest.mock('../hooks/use_kibana');
 jest.mock('@kbn/ebt-tools');
@@ -61,6 +64,7 @@ const mockUseFetchEventById = useFetchEventById as jest.Mock;
 const mockUseFetchSignificantEvents = useFetchSignificantEvents as jest.Mock;
 const mockUseFetchInvestigationStatuses = useFetchInvestigationStatuses as jest.Mock;
 const mockUseCloseSignificantEvent = useCloseSignificantEvent as jest.Mock;
+const mockUseFetchHomepageInvestigations = useFetchHomepageInvestigations as jest.Mock;
 const mockUseStartEventInvestigation = useStartEventInvestigation as jest.Mock;
 const mockUseKibana = useKibana as jest.Mock;
 const mockUsePageReady = usePageReady as jest.Mock;
@@ -116,6 +120,10 @@ function setEvents({
     refetch: jest.fn(),
   });
   mockUseFetchInvestigationStatuses.mockReturnValue({ data: undefined });
+}
+
+function setHomepageInvestigations(investigations: HomepageInvestigationRecord[] = []) {
+  mockUseFetchHomepageInvestigations.mockReturnValue({ data: investigations });
 }
 
 function setEventById({
@@ -203,6 +211,7 @@ describe('NightshiftApp', () => {
     });
     setEvents();
     setEventById();
+    setHomepageInvestigations();
   });
 
   it('renders hero message when events need action', () => {
@@ -832,5 +841,63 @@ describe('NightshiftApp', () => {
 
     expect(screen.queryByTestId('stubHomepageInvestigationFlyout')).not.toBeInTheDocument();
     expect(screen.getByTestId('locationProbe')).not.toHaveTextContent('investigationId=');
+  });
+
+  it('keeps past homepage investigations on the landing page after the flyout closes', () => {
+    setEvents({ events: [mockEvent()] });
+    setHomepageInvestigations([
+      {
+        investigation_id: 'homepage-exec-1',
+        status: 'completed',
+        created_at: '2026-09-04T22:06:55.578Z',
+        subject: {
+          type: 'significant_event',
+          id: 'homepage-prompt',
+          summary: 'Why did payment timeouts increase?',
+        },
+      },
+    ]);
+    renderWithIntl(
+      <>
+        <NightshiftApp />
+        <LocationProbe />
+      </>,
+      { initialEntries: ['/?investigationId=homepage-exec-1'] }
+    );
+
+    fireEvent.click(screen.getByTestId('stubHomepageInvestigationFlyoutClose'));
+
+    expect(screen.queryByTestId('stubHomepageInvestigationFlyout')).not.toBeInTheDocument();
+    expect(screen.getByText('Why did payment timeouts increase?')).toBeInTheDocument();
+    expect(screen.getByTestId('locationProbe')).not.toHaveTextContent('investigationId=');
+  });
+
+  it('reopens a past homepage investigation from the landing list', () => {
+    setEvents({ events: [mockEvent()] });
+    setHomepageInvestigations([
+      {
+        investigation_id: 'homepage-exec-1',
+        status: 'completed',
+        created_at: '2026-09-04T22:06:55.578Z',
+        subject: {
+          type: 'significant_event',
+          id: 'homepage-prompt',
+          summary: 'Why did payment timeouts increase?',
+        },
+      },
+    ]);
+    renderWithIntl(
+      <>
+        <NightshiftApp />
+        <LocationProbe />
+      </>
+    );
+
+    fireEvent.click(screen.getByTestId('nightshiftHomepageInvestigationItem'));
+
+    expect(screen.getByText('Investigation: homepage-exec-1')).toBeInTheDocument();
+    expect(screen.getByTestId('locationProbe')).toHaveTextContent(
+      'investigationId=homepage-exec-1'
+    );
   });
 });

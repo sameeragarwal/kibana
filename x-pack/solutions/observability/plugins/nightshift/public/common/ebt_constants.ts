@@ -32,6 +32,7 @@ export const NIGHTSHIFT_EBT_ELEMENTS = {
   ENTITY_FLYOUT: 'nightshiftEntityFlyout',
   EVENT_FLYOUT: 'nightshiftEventFlyout',
   HOMEPAGE_INVESTIGATION_FLYOUT: 'nightshiftHomepageInvestigationFlyout',
+  HOMEPAGE_INVESTIGATIONS_LIST: 'nightshiftHomepageInvestigationsList',
   HOMEPAGE_PROMPT: 'nightshiftHomepagePrompt',
   EVENT_FLYOUT_DETECTIONS: 'nightshiftEventFlyoutDetections',
   EVENT_FLYOUT_INVESTIGATION: 'nightshiftEventFlyoutInvestigation',

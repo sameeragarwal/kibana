@@ -38,8 +38,9 @@ export interface HomepageInvestigationRecord {
   };
 }
 
-const isRunningRecordStatus = (status: HomepageInvestigationRecordStatus): boolean =>
-  status === 'pending' || status === 'running';
+export const isRunningHomepageInvestigationStatus = (
+  status: HomepageInvestigationRecordStatus
+): boolean => status === 'pending' || status === 'running';
 
 export const useFetchInvestigation = (
   investigationId: string | undefined
@@ -55,7 +56,7 @@ export const useFetchInvestigation = (
         { signal }
       ),
     refetchInterval: (data) =>
-      data && isRunningRecordStatus(data.status)
+      data && isRunningHomepageInvestigationStatus(data.status)
         ? RUNNING_INVESTIGATION_REFETCH_INTERVAL_MS
         : false,
   });

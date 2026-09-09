@@ -234,6 +234,26 @@ const createServices = ({
         prepend: (path: string) => path,
       },
       get: async (path: string) => {
+        if (path === '/internal/nightshift/investigations') {
+          return {
+            results: [
+              {
+                investigation_id: 'storybook-investigation-exec',
+                status: 'running',
+                created_at: '2026-09-04T22:06:55.578Z',
+                started_at: '2026-09-04T22:06:56.114Z',
+                subject: {
+                  type: 'significant_event',
+                  id: 'homepage-prompt',
+                  summary: 'Why did payment timeouts increase?',
+                },
+              },
+            ],
+            page: 1,
+            size: 100,
+            total: 1,
+          };
+        }
         if (path.startsWith('/internal/nightshift/investigations/')) {
           return {
             investigation_id: 'storybook-investigation-exec',

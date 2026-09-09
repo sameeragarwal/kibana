@@ -33,12 +33,14 @@ import { useFetchEventById } from '../hooks/use_fetch_event_by_id';
 import { useFetchSignificantEvents } from '../hooks/use_fetch_significant_events';
 import { useFetchInvestigationStatuses } from '../hooks/use_fetch_investigation_statuses';
 import { useCloseSignificantEvent } from '../hooks/use_close_significant_event';
+import { useFetchHomepageInvestigations } from '../hooks/use_fetch_homepage_investigations';
 import { useStartEventInvestigation } from '../hooks/use_start_event_investigation';
 import {
   buildImpactedServiceChips,
   filterEventsByImpactedServiceChip,
 } from '../landing/impacted_services_chips';
 import { ImpactedServices } from '../landing/impacted_services';
+import { HomepageInvestigationsList } from '../landing/homepage_investigations_list';
 import { HomepagePrompt } from '../landing/homepage_prompt';
 import { HomepageInvestigationFlyout } from '../landing/homepage_investigation_flyout';
 import { SignificantEventList } from '../landing/significant_event_list';
@@ -95,6 +97,7 @@ export function NightshiftApp(): React.ReactElement {
   const [isTransitioningFromLoading, setIsTransitioningFromLoading] = useState(false);
 
   const { data, error: eventsError, isFetching, isLoading, refetch } = useFetchSignificantEvents();
+  const { data: homepageInvestigations = [] } = useFetchHomepageInvestigations();
   const { closeSignificantEvent, closingEventUuid } = useCloseSignificantEvent();
   const wasLoadingRef = useRef(isLoading);
 
@@ -280,12 +283,20 @@ export function NightshiftApp(): React.ReactElement {
   }, []);
 
   const hasEvents = shownEvents.length > 0;
+  const hasHomepageInvestigations = homepageInvestigations.length > 0;
   const hasNeedsAction = needsActionEvents.length > 0;
-  const showCenteredEmptyLayout = isLoading || !hasEvents;
+  const showCenteredEmptyLayout = isLoading || (!hasEvents && !hasHomepageInvestigations);
   const homepagePrompt = !isLoading ? (
     <HomepagePrompt
       isSubmitting={isStartingInvestigation}
       onInvestigate={startEventInvestigation}
+    />
+  ) : null;
+  const homepageInvestigationsList = !isLoading ? (
+    <HomepageInvestigationsList
+      investigations={homepageInvestigations}
+      onInvestigationClick={handleHomepageInvestigateStarted}
+      selectedInvestigationId={selectedInvestigationIdFromUrl}
     />
   ) : null;
   const contentTopMargin =
@@ -442,6 +453,7 @@ export function NightshiftApp(): React.ReactElement {
       />
 
       {homepagePrompt}
+      {homepageInvestigationsList}
 
       {showCenteredEmptyLayout ? (
         <>
@@ -449,7 +461,7 @@ export function NightshiftApp(): React.ReactElement {
           {investigationNotFoundCallout}
           <NightshiftEmptyState isProcessing={isLoading} logsHref={emptyStateLogsHref} />
         </>
-      ) : (
+      ) : hasEvents ? (
         <div
           data-test-subj="nightshiftPopulatedContent"
           css={[
@@ -559,6 +571,11 @@ export function NightshiftApp(): React.ReactElement {
             </EuiFlexGroup>
           </EuiFlexItem>
         </div>
+      ) : (
+        <>
+          {eventNotFoundCallout}
+          {investigationNotFoundCallout}
+        </>
       )}
 
       {isTransitioningFromLoading && (

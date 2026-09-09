@@ -19,6 +19,20 @@ const RUN_STATUS_TO_INVESTIGATION_STATUS: Record<InvestigationRunStatus, Investi
 export const toInvestigationStatus = (status: InvestigationRunStatus): InvestigationStatus =>
   RUN_STATUS_TO_INVESTIGATION_STATUS[status];
 
+export const toHomepageInvestigationWorkflowStatus = (
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+): InvestigationStatus => {
+  switch (status) {
+    case 'completed':
+      return 'complete';
+    case 'failed':
+    case 'cancelled':
+      return 'failed';
+    default:
+      return 'running';
+  }
+};
+
 export const getInvestigationProgressStatusLabel = (isInvestigated: boolean): string =>
   isInvestigated
     ? i18n.translate('xpack.nightshift.investigation.progressInvestigated', {

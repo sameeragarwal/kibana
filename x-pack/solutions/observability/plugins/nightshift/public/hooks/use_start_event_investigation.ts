@@ -6,12 +6,16 @@
  */
 
 import { i18n } from '@kbn/i18n';
-import { useMutation } from '@kbn/react-query';
+import { useMutation, useQueryClient } from '@kbn/react-query';
 import { MAX_TEXT_LENGTH } from '@kbn/significant-events-schema';
+import { HOMEPAGE_INVESTIGATION_SUBJECT_ID } from '../common/constants';
+import {
+  addPendingHomepageInvestigationInCache,
+  NIGHTSHIFT_HOMEPAGE_INVESTIGATIONS_QUERY_KEY,
+} from './use_fetch_homepage_investigations';
 import { useKibana } from './use_kibana';
 
-/** Synthetic subject so persist can record the run without binding it to a homepage event. */
-export const HOMEPAGE_INVESTIGATION_SUBJECT_ID = 'homepage-prompt';
+export { HOMEPAGE_INVESTIGATION_SUBJECT_ID };
 
 const START_SUCCESS_TOAST_TITLE = i18n.translate(
   'xpack.nightshift.homepagePrompt.investigationStartedToastTitle',
@@ -45,6 +49,7 @@ export const useStartEventInvestigation = ({
   onStarted?: (investigationId: string) => void;
 } = {}): UseStartEventInvestigationResult => {
   const { http, notifications } = useKibana().services;
+  const queryClient = useQueryClient();
 
   const mutation = useMutation({
     mutationFn: (message: string) => {
@@ -60,7 +65,18 @@ export const useStartEventInvestigation = ({
         }),
       });
     },
-    onSuccess: ({ investigation_id: investigationId }) => {
+    onSuccess: ({ investigation_id: investigationId }, message) => {
+      addPendingHomepageInvestigationInCache(queryClient, {
+        investigation_id: investigationId,
+        status: 'pending',
+        created_at: new Date().toISOString(),
+        subject: {
+          type: 'significant_event',
+          id: HOMEPAGE_INVESTIGATION_SUBJECT_ID,
+          summary: message.trim().slice(0, MAX_TEXT_LENGTH),
+        },
+      });
+      void queryClient.invalidateQueries({ queryKey: NIGHTSHIFT_HOMEPAGE_INVESTIGATIONS_QUERY_KEY });
       notifications.toasts.addSuccess({ title: START_SUCCESS_TOAST_TITLE });
       onStarted?.(investigationId);
     },

@@ -9,6 +9,7 @@ import React from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@kbn/react-query';
 import { useKibana } from './use_kibana';
+import { NIGHTSHIFT_HOMEPAGE_INVESTIGATIONS_QUERY_KEY } from './use_fetch_homepage_investigations';
 import {
   HOMEPAGE_INVESTIGATION_SUBJECT_ID,
   useStartEventInvestigation,
@@ -63,6 +64,20 @@ describe('useStartEventInvestigation', () => {
       })
     );
     expect(onStarted).toHaveBeenCalledWith('exec-1');
+    const cached = queryClient.getQueryData(NIGHTSHIFT_HOMEPAGE_INVESTIGATIONS_QUERY_KEY) as
+      | Array<{ investigation_id: string; subject: { summary?: string } }>
+      | undefined;
+    expect(cached?.[0]).toEqual(
+      expect.objectContaining({
+        investigation_id: 'exec-1',
+        status: 'pending',
+        subject: {
+          type: 'significant_event',
+          id: HOMEPAGE_INVESTIGATION_SUBJECT_ID,
+          summary: 'Why did payment timeouts increase?',
+        },
+      })
+    );
   });
 
   it('toasts when the investigation cannot start', async () => {
