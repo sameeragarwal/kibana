@@ -241,77 +241,6 @@ describe('runAfterRoundWorkflows', () => {
       expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Network error'));
       expect(executeWorkflowMock).toHaveBeenCalledTimes(2);
     });
-
-    it('logs an error and continues when execution status is FAILED', async () => {
-      const { workflowApi, getInternalServices } = createDeps();
-      executeWorkflowMock.mockResolvedValue({
-        success: true,
-        execution: {
-          execution_id: 'exec-fail',
-          status: ExecutionStatus.FAILED,
-          workflow_id: 'wf-1',
-          workflow_name: 'Workflow One',
-          started_at: '2026-01-01T00:00:00.000Z',
-          error_message: 'Step crashed',
-        },
-      });
-
-      await expect(
-        runAfterRoundWorkflows({
-          context: createContext(),
-          workflowApi,
-          getInternalServices,
-          logger,
-        })
-      ).resolves.toBeUndefined();
-
-      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Workflow One'));
-      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Step crashed'));
-    });
-
-    it('uses workflow_id as fallback name when workflow_name is absent', async () => {
-      const { workflowApi, getInternalServices } = createDeps();
-      executeWorkflowMock.mockResolvedValue({
-        success: true,
-        execution: {
-          execution_id: 'exec-fail',
-          status: ExecutionStatus.FAILED,
-          workflow_id: 'wf-1',
-          started_at: '2026-01-01T00:00:00.000Z',
-        },
-      });
-
-      await runAfterRoundWorkflows({
-        context: createContext(),
-        workflowApi,
-        getInternalServices,
-        logger,
-      });
-
-      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('wf-1'));
-    });
-
-    it('uses "unknown error" when FAILED execution has no error_message', async () => {
-      const { workflowApi, getInternalServices } = createDeps();
-      executeWorkflowMock.mockResolvedValue({
-        success: true,
-        execution: {
-          execution_id: 'exec-fail',
-          status: ExecutionStatus.FAILED,
-          workflow_id: 'wf-1',
-          started_at: '2026-01-01T00:00:00.000Z',
-        },
-      });
-
-      await runAfterRoundWorkflows({
-        context: createContext(),
-        workflowApi,
-        getInternalServices,
-        logger,
-      });
-
-      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('unknown error'));
-    });
   });
 
   describe('successful execution', () => {
@@ -359,7 +288,7 @@ describe('runAfterRoundWorkflows', () => {
       );
     });
 
-    it('calls executeWorkflow with waitForCompletion: true', async () => {
+    it('calls executeWorkflow with waitForCompletion: false', async () => {
       const { workflowApi, getInternalServices } = createDeps();
 
       await runAfterRoundWorkflows({
@@ -370,7 +299,7 @@ describe('runAfterRoundWorkflows', () => {
       });
 
       expect(executeWorkflowMock).toHaveBeenCalledWith(
-        expect.objectContaining({ waitForCompletion: true })
+        expect.objectContaining({ waitForCompletion: false })
       );
     });
   });

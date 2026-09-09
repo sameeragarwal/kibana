@@ -11,7 +11,7 @@ import {
   isToolCallStep,
   type ToolCallStep,
 } from '@kbn/agent-builder-common';
-import { WORKFLOWS_UI_SETTING_ID, ExecutionStatus } from '@kbn/workflows';
+import { WORKFLOWS_UI_SETTING_ID } from '@kbn/workflows';
 import type { Logger } from '@kbn/logging';
 import type { WorkflowsServerPluginSetup } from '@kbn/workflows-management-plugin/server';
 import { executeWorkflow } from '@kbn/agent-builder-tools-base/workflows';
@@ -77,27 +77,16 @@ export const runAfterRoundWorkflows = async ({
       request: context.request,
       spaceId,
       workflowApi,
-      waitForCompletion: true,
+      waitForCompletion: false,
     });
 
     if (!result.success) {
-      logger.error(`Post-round workflow "${workflowId}" failed to execute: ${result.error}`);
-      continue;
-    }
-
-    const execution = result.execution;
-    if (execution.status === ExecutionStatus.FAILED) {
-      const workflowName = execution.workflow_name ?? execution.workflow_id;
-      logger.error(
-        `Post-round workflow "${workflowName}" execution failed: ${
-          execution.error_message ?? 'unknown error'
-        }`
-      );
+      logger.error(`Post-round workflow "${workflowId}" failed to start: ${result.error}`);
       continue;
     }
 
     logger.debug(
-      `Post-round workflow execution finished: ${execution.workflow_id} (${execution.execution_id})`
+      `Post-round workflow started: ${result.execution.workflow_id} (${result.execution.execution_id})`
     );
   }
 };

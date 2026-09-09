@@ -7,19 +7,13 @@
 
 import type { AgentBuilderPluginSetup } from '@kbn/agent-builder-server';
 import type { AgentTypeDefinition } from '@kbn/agent-builder-server/agents';
-import { platformCoreTools, platformSignificantEventsTools } from '@kbn/agent-builder-common/tools';
-import { SIGNIFICANT_EVENTS_SANDBOX_SEED_WORKFLOW_ID } from '@kbn/workflows/managed';
-import instructions from './instructions/investigator.md.text';
+import { platformSignificantEventsTools } from '@kbn/agent-builder-common/tools';
 import {
-  OBSERVABILITY_GET_LOGS_TOOL_ID,
-  OBSERVABILITY_GET_INDEX_INFO_TOOL_ID,
-  OBSERVABILITY_GET_SERVICE_TOPOLOGY_TOOL_ID,
-  OBSERVABILITY_GET_TRACE_METRICS_TOOL_ID,
-  OBSERVABILITY_GET_LOG_CHANGE_POINTS_TOOL_ID,
-  OBSERVABILITY_GET_METRIC_CHANGE_POINTS_TOOL_ID,
-  OBSERVABILITY_GET_SERVICES_TOOL_ID,
-  OBSERVABILITY_GET_TRACES_TOOL_ID,
-} from './discovery_tool_ids';
+  NIGHTSHIFT_CORTEX_HYDRATE_WORKFLOW_ID,
+  NIGHTSHIFT_CORTEX_OPTIMIZE_WORKFLOW_ID,
+  SIGNIFICANT_EVENTS_SANDBOX_SEED_WORKFLOW_ID,
+} from '@kbn/workflows/managed';
+import instructions from './instructions/investigator.md.text';
 import { SANDBOX_BASH_TOOL_ID } from '../../tools/sandbox_bash/tool';
 import { SANDBOX_VIEW_FILE_TOOL_ID } from '../../tools/sandbox_bash/view_file_tool';
 import { SANDBOX_STR_REPLACE_TOOL_ID } from '../../tools/sandbox_bash/str_replace_tool';
@@ -46,24 +40,11 @@ export const getInvestigationAgentType = ({
   avatar_icon: 'logoElastic',
   baseConfiguration: {
     instructions,
-    skill_ids: ['significant-events-memory', 'observability.investigation', 'streams-management'],
+    skill_ids: [],
     tools: [
       {
         tool_ids: [
           platformSignificantEventsTools.reportInvestigationProgress,
-          platformSignificantEventsTools.searchKnowledgeIndicators,
-          platformCoreTools.executeEsql,
-          platformCoreTools.generateEsql,
-          platformCoreTools.executeWorkflow,
-          platformCoreTools.getWorkflowExecutionStatus,
-          OBSERVABILITY_GET_LOGS_TOOL_ID,
-          OBSERVABILITY_GET_INDEX_INFO_TOOL_ID,
-          OBSERVABILITY_GET_SERVICE_TOPOLOGY_TOOL_ID,
-          OBSERVABILITY_GET_TRACE_METRICS_TOOL_ID,
-          OBSERVABILITY_GET_LOG_CHANGE_POINTS_TOOL_ID,
-          OBSERVABILITY_GET_METRIC_CHANGE_POINTS_TOOL_ID,
-          OBSERVABILITY_GET_SERVICES_TOOL_ID,
-          OBSERVABILITY_GET_TRACES_TOOL_ID,
           ...(sandboxEnabled
             ? [
                 SANDBOX_BASH_TOOL_ID,
@@ -75,15 +56,24 @@ export const getInvestigationAgentType = ({
         ],
       },
     ],
-    // Keep Elastic capabilities available while starting with no connectors. Admin-selected
-    // connectors are persisted on the derived agent and merged into this allow-list.
-    enable_elastic_capabilities: true,
+    // Do not inject default ES|QL / index / workflow tools. Telemetry queries run
+    // in the sandbox via `/workspace/elastic.md` (curl / python against ES).
+    enable_elastic_capabilities: false,
     connector_ids: [],
-    // Wire the sandbox-seed workflow when the sandbox is configured. This runs as a
-    // pre-execution workflow before every agent turn, seeding /workspace on the first round.
-    // Conditional: without sandbox config the step throws, which would abort every
-    // investigation round.
-    ...(sandboxEnabled ? { workflow_ids: [SIGNIFICANT_EVENTS_SANDBOX_SEED_WORKFLOW_ID] } : {}),
+    // Pre-execution workflows run as the beforeAgent hook. Sandbox seed + Cortex
+    // hydrate both write into /workspace; without sandbox config those steps throw
+    // and would abort every investigation round.
+    ...(sandboxEnabled
+      ? {
+          workflow_ids: [
+            SIGNIFICANT_EVENTS_SANDBOX_SEED_WORKFLOW_ID,
+            NIGHTSHIFT_CORTEX_HYDRATE_WORKFLOW_ID,
+          ],
+        }
+      : {}),
+    // Post-round workflow is fire-and-forget (afterRound, waitForCompletion: false)
+    // so the investigation can finish while Cortex Optimize is still writing.
+    post_round_workflow_ids: [NIGHTSHIFT_CORTEX_OPTIMIZE_WORKFLOW_ID],
   },
 });
 

@@ -11,6 +11,10 @@ import { StepCategory } from '@kbn/workflows';
 import { createServerStepDefinition } from '@kbn/workflows-extensions/server';
 import type { SandboxConnectionManager } from '../tools/sandbox_bash/grpc_client';
 import { resolveAbsolutePath } from '../tools/sandbox_bash/tool_utils';
+import { withTimeout } from './with_timeout';
+
+/** Caps beforeAgent so a stuck sandbox allocate cannot stall the investigation. */
+const WRITE_TIMEOUT_MS = 20_000;
 
 /** Maximum content size for a single workflow write (1 MiB). */
 const MAX_CONTENT_BYTES = 1024 * 1024;
@@ -65,14 +69,22 @@ export const sandboxWriteFileStepDefinition = (
 
       const absolutePath = resolveAbsolutePath(file_path);
       const parentDir = dirname(absolutePath);
-      if (parentDir !== '/') {
-        await manager.apiClient.mkdirs(conversation_id, [parentDir]);
-      }
+      const write = (async () => {
+        if (parentDir !== '/') {
+          await manager.apiClient.mkdirs(conversation_id, [parentDir]);
+        }
 
-      const contentBuffer = Buffer.from(content, 'utf8');
-      await manager.apiClient.writeFiles(conversation_id, [
-        { path: absolutePath, content: contentBuffer },
-      ]);
+        const contentBuffer = Buffer.from(content, 'utf8');
+        await manager.apiClient.writeFiles(conversation_id, [
+          { path: absolutePath, content: contentBuffer },
+        ]);
+        return contentBuffer;
+      })();
+      const contentBuffer = await withTimeout(
+        write,
+        WRITE_TIMEOUT_MS,
+        `Sandbox write timed out after ${WRITE_TIMEOUT_MS}ms`
+      );
 
       return {
         output: {

@@ -35,11 +35,12 @@ export const installInvestigationAgent = async ({
       labels: ['observability', 'streams', 'significant-events', 'investigation', 'root-cause'],
       avatar_symbol: 'NI',
       access_control: { access_mode: AgentAccessControlMode.Public },
-      configuration: {
-        tools: [],
-        skill_ids: [],
-        connector_ids: [],
-      },
+        configuration: {
+          tools: [],
+          skill_ids: [],
+          connector_ids: [],
+          enable_elastic_capabilities: false,
+        },
     },
   });
 };

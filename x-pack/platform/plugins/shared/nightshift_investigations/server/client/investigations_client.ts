@@ -656,6 +656,14 @@ export class NightshiftInvestigationsClient {
     return toInvestigationResponse(record);
   }
 
+  async delete(investigationId: string): Promise<void> {
+    const record = await this.investigationRepository.get(investigationId);
+    if (!record) {
+      throw new InvestigationNotFoundError(investigationId);
+    }
+    await this.investigationRepository.delete(investigationId);
+  }
+
   async list({
     statuses,
     concurrency_key,

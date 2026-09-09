@@ -8,13 +8,14 @@
 import type {
   CoreSetup,
   CoreStart,
+  ElasticsearchServiceStart,
+  KibanaRequest,
   Logger,
   Plugin,
   PluginInitializerContext,
 } from '@kbn/core/server';
 import { SECURITY_EXTENSION_ID } from '@kbn/core-saved-objects-server';
 import { registerRoutes } from '@kbn/server-route-repository';
-import type { KibanaRequest } from '@kbn/core/server';
 import { DEFAULT_SPACE_ID } from '@kbn/core-spaces-common';
 import type { WorkflowsExtensionsServerPluginStart } from '@kbn/workflows-extensions/server';
 import { HookLifecycle, HookExecutionMode } from '@kbn/agent-builder-server';
@@ -23,12 +24,15 @@ import { NightshiftInvestigationsClient } from './client/investigations_client';
 import { NIGHTSHIFT_INVESTIGATIONS_MANAGED_WORKFLOW_OWNER } from './lib/managed_workflows/constants';
 import { installInvestigationWorkflow } from './lib/managed_workflows/install_investigation_workflow';
 import { installSandboxSeedWorkflow } from './lib/managed_workflows/install_sandbox_seed_workflow';
+import { installCortexWorkflows } from './lib/managed_workflows/install_cortex_workflows';
 import { installInvestigationAgent } from './lib/install_investigation_agent';
 import { nightshiftInvestigationsRouteRepository } from './routes';
 import { isInvestigationAvailable } from './is_investigation_available';
 import { ensureInvestigationAgentStepDefinition } from './step_definitions/ensure_investigation_agent';
 import { triggerInvestigationStepDefinition } from './step_definitions/trigger_investigation';
 import { sandboxWriteFileStepDefinition } from './step_definitions/sandbox_write_file';
+import { cortexHydrateStepDefinition } from './step_definitions/cortex_hydrate';
+import { cortexOptimizeStepDefinition } from './step_definitions/cortex_optimize';
 import { createTriggerEmitter, type TriggerEmitter } from './workflows/triggers/emit';
 import { registerInvestigationsWorkflowTriggers } from './workflows/triggers/register_triggers';
 import { registerInvestigationAgentType } from './agents/investigation';
@@ -55,6 +59,11 @@ import type {
   NightshiftInvestigationsSetupDeps,
   NightshiftInvestigationsStartDeps,
 } from './types';
+import {
+  createCortexStore,
+  hydrateCortexWorkspace,
+  registerCortexAiIndex,
+} from './cortex/register_cortex';
 
 export class NightshiftInvestigationsPlugin
   implements
@@ -73,6 +82,8 @@ export class NightshiftInvestigationsPlugin
   private searchInferenceEndpoints?: NightshiftInvestigationsStartDeps['searchInferenceEndpoints'];
   private ruleRegistry?: NightshiftInvestigationsStartDeps['ruleRegistry'];
   private actionsStart?: NightshiftInvestigationsStartDeps['actions'];
+  private inference?: NightshiftInvestigationsStartDeps['inference'];
+  private elasticsearch?: ElasticsearchServiceStart;
   private savedObjects?: CoreStart['savedObjects'];
   private sandboxConnectionManager?: SandboxConnectionManager;
 
@@ -88,6 +99,7 @@ export class NightshiftInvestigationsPlugin
     const config = this.ctx.config.get();
     this.workflowsManagement = plugins.workflowsManagement;
     registerInvestigationsWorkflowTriggers(plugins.workflowsExtensions);
+    registerCortexAiIndex(plugins.contextEngine, this.logger.get('cortex'));
 
     core.savedObjects.registerType(nightshiftInvestigationSavedObjectType);
 
@@ -140,9 +152,22 @@ export class NightshiftInvestigationsPlugin
           logger: sandboxLogger.get('workspace'),
         });
 
-        connectionManager.setRestoreCallback((conversationId) =>
-          workspaceManager.restoreWorkspace(conversationId)
-        );
+        connectionManager.setRestoreCallback(async (conversationId, request) => {
+          await workspaceManager.restoreWorkspace(conversationId);
+          if (!this.elasticsearch) {
+            return;
+          }
+          await hydrateCortexWorkspace({
+            apiClient: connectionManager.apiClient,
+            conversationId,
+            esClient: this.elasticsearch.client.asScoped(request).asCurrentUser,
+            logger: sandboxLogger.get('cortex'),
+          }).catch((err) => {
+            sandboxLogger
+              .get('cortex')
+              .warn(`Cortex hydrate failed for conversation ${conversationId}: ${err}`);
+          });
+        });
 
         plugins.agentBuilder.tools.register(
           createSandboxBashTool({ connectionManager, logger: sandboxLogger })
@@ -190,6 +215,19 @@ export class NightshiftInvestigationsPlugin
         plugins.workflowsExtensions.registerStepDefinition(
           sandboxWriteFileStepDefinition(() => this.sandboxConnectionManager)
         );
+        plugins.workflowsExtensions.registerStepDefinition(
+          cortexHydrateStepDefinition({
+            getConnectionManager: () => this.sandboxConnectionManager,
+            logger: this.logger.get('cortex'),
+          })
+        );
+        plugins.workflowsExtensions.registerStepDefinition(
+          cortexOptimizeStepDefinition({
+            getInference: () => this.inference,
+            getSearchInferenceEndpoints: () => this.searchInferenceEndpoints,
+            logger: this.logger.get('cortex'),
+          })
+        );
       }
 
       registerRoutes({
@@ -199,6 +237,17 @@ export class NightshiftInvestigationsPlugin
           getTriggerEmitter,
           getAlertsClient: (request: KibanaRequest) =>
             this.ruleRegistry?.getRacClientWithRequest(request),
+          getCortexPageStore: (request: KibanaRequest) => {
+            if (!this.elasticsearch) {
+              throw new Error(
+                'elasticsearch is not available — plugin start() has not been called'
+              );
+            }
+            return createCortexStore({
+              esClient: this.elasticsearch.client.asScoped(request).asCurrentUser,
+              logger: this.logger.get('cortex'),
+            });
+          },
         },
         core,
         logger: this.logger,
@@ -221,6 +270,8 @@ export class NightshiftInvestigationsPlugin
     this.searchInferenceEndpoints = plugins.searchInferenceEndpoints;
     this.ruleRegistry = plugins.ruleRegistry;
     this.actionsStart = plugins.actions;
+    this.inference = plugins.inference;
+    this.elasticsearch = coreStart.elasticsearch;
     this.savedObjects = coreStart.savedObjects;
 
     // The `nightshift.ensureInvestigationAgent` workflow step is the general guarantee that the
@@ -318,6 +369,7 @@ export class NightshiftInvestigationsPlugin
     );
     await installInvestigationWorkflow({ client });
     await installSandboxSeedWorkflow({ client });
+    await installCortexWorkflows({ client });
     await client.ready();
   }
 

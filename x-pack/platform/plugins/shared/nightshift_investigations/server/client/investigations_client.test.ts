@@ -118,6 +118,7 @@ const createMockRepository = (): jest.Mocked<InvestigationRepository> => ({
   create: jest.fn().mockResolvedValue(undefined),
   get: jest.fn().mockResolvedValue(undefined),
   update: jest.fn().mockResolvedValue(undefined),
+  delete: jest.fn().mockResolvedValue(undefined),
   find: jest.fn().mockResolvedValue(findResult([])),
 });
 

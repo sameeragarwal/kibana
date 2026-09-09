@@ -640,12 +640,15 @@ type SandboxConfig = NonNullable<NightshiftInvestigationsConfig['sandbox']>;
 
 export class SandboxConnectionManager {
   private readonly logger: Logger;
-  private readonly apiClient: SandboxApiClient;
+  /** Exposed so workflow steps and Cortex hydrate can write without re-entering init. */
+  readonly apiClient: SandboxApiClient;
   private readonly getConnectors?: ConnectorSource;
+  private readonly telemetryEs?: { url: string; apiKey: string };
   /** Tracks conversations that have been initialized (restore + seed). */
   private readonly initialized = new Map<string, Promise<void>>();
-  /** Called once per conversation so workspace can be restored before seeding. */
-  private restoreCallback?: (conversationId: string) => Promise<void>;
+  /** Called once per conversation so workspace can be restored before seeding.
+   *  Receives the tool-call request so Cortex can read the wiki as the current user. */
+  private restoreCallback?: (conversationId: string, request: KibanaRequest) => Promise<void>;
 
   constructor({
     config,
@@ -658,6 +661,17 @@ export class SandboxConnectionManager {
   }) {
     this.logger = logger;
     this.getConnectors = getConnectors;
+    if (
+      config.telemetry_elasticsearch_url !== undefined &&
+      config.telemetry_elasticsearch_url.length > 0 &&
+      config.telemetry_elasticsearch_api_key !== undefined &&
+      config.telemetry_elasticsearch_api_key.length > 0
+    ) {
+      this.telemetryEs = {
+        url: config.telemetry_elasticsearch_url,
+        apiKey: config.telemetry_elasticsearch_api_key,
+      };
+    }
     this.apiClient = new SandboxApiClient({
       host: config.sandbox_api_host,
       port: config.sandbox_api_port,
@@ -739,7 +753,7 @@ export class SandboxConnectionManager {
     return this.apiClient.restoreState(conversationId, sourceUrl, targetPath);
   }
 
-  setRestoreCallback(cb: (conversationId: string) => Promise<void>): void {
+  setRestoreCallback(cb: (conversationId: string, request: KibanaRequest) => Promise<void>): void {
     this.restoreCallback = cb;
   }
 
@@ -779,7 +793,7 @@ export class SandboxConnectionManager {
     this.logger.debug(`Initializing sandbox for conversation ${conversationId}`);
 
     if (this.restoreCallback) {
-      await this.restoreCallback(conversationId).catch((err) => {
+      await this.restoreCallback(conversationId, request).catch((err) => {
         this.logger.warn(`Workspace restore failed for conversation ${conversationId}: ${err}`);
       });
     }
@@ -790,6 +804,7 @@ export class SandboxConnectionManager {
         apiClient: this.apiClient,
         request,
         getConnectors: this.getConnectors,
+        telemetryEs: this.telemetryEs,
         logger: this.logger,
       }).catch((err) => {
         this.logger.warn(`Sandbox seeding failed: ${err.message}`);

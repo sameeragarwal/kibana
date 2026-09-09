@@ -31,7 +31,7 @@ const toRecord = <Attributes extends Partial<InvestigationAttributes>>({
 
 export type InvestigationSavedObjectsClient = Pick<
   SavedObjectsClientContract,
-  'create' | 'get' | 'update' | 'find'
+  'create' | 'get' | 'update' | 'find' | 'delete'
 >;
 
 export interface SavedObjectInvestigationRepositoryDeps {
@@ -100,6 +100,17 @@ export class SavedObjectInvestigationRepository implements InvestigationReposito
     } catch (error) {
       if (SavedObjectsErrorHelpers.isConflictError(error)) {
         throw new InvestigationStaleWriteError(id);
+      }
+      throw error;
+    }
+  }
+
+  async delete(id: string): Promise<void> {
+    try {
+      await this.savedObjectsClient.delete(NIGHTSHIFT_INVESTIGATION_SO_TYPE, id);
+    } catch (error) {
+      if (SavedObjectsErrorHelpers.isNotFoundError(error)) {
+        return;
       }
       throw error;
     }

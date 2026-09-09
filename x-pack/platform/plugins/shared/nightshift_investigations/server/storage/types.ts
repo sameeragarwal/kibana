@@ -77,6 +77,7 @@ export interface InvestigationRepository {
   create(params: { id: string; attributes: InvestigationAttributes }): Promise<void>;
   get(id: string): Promise<InvestigationRecord | undefined>;
   update(params: { id: string; patch: InvestigationPatch; version?: string }): Promise<void>;
+  delete(id: string): Promise<void>;
   find<Fields extends keyof InvestigationAttributes = keyof InvestigationAttributes>(
     query: FindInvestigationsQuery<Fields>
   ): Promise<FindInvestigationsResult<Fields>>;

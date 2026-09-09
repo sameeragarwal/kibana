@@ -30,6 +30,11 @@ const sandboxConfigSchema = schema.object({
   s3_access_key_id: schema.maybe(schema.string()),
   s3_secret_access_key: schema.maybe(schema.string()),
   s3_region: schema.string({ defaultValue: 'us-east-1' }),
+  // Local-only hack: scoped ES API key written into /workspace/.env so the
+  // sandbox can query cluster telemetry until a real credential story exists.
+  // Keep values in gitignored kibana.dev.yml — never commit the key.
+  telemetry_elasticsearch_url: schema.maybe(schema.string()),
+  telemetry_elasticsearch_api_key: schema.maybe(schema.string()),
 });
 
 const configSchema = schema.object({

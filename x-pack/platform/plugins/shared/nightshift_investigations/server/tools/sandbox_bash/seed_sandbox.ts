@@ -8,34 +8,50 @@
 import type { KibanaRequest, Logger } from '@kbn/core/server';
 import type { SandboxApiClient } from './grpc_client';
 import type { ConnectorSource } from './connector_sources';
-import { renderConnectorFiles } from './connector_env';
+import { renderConnectorFiles, renderElasticMd, renderTelemetryFiles } from './connector_env';
 
 export const seedSandbox = async ({
   conversationId,
   apiClient,
   request,
   getConnectors,
+  telemetryEs,
   logger,
 }: {
   conversationId: string;
   apiClient: SandboxApiClient;
   request: KibanaRequest;
   getConnectors: ConnectorSource;
+  telemetryEs?: { url: string; apiKey: string };
   logger: Logger;
 }): Promise<void> => {
   const connectors = await getConnectors(request);
+  const telemetry = telemetryEs !== undefined ? renderTelemetryFiles(telemetryEs) : undefined;
 
-  if (connectors.length === 0) {
-    logger.debug('No connectors available; skipping sandbox seeding');
+  if (connectors.length === 0 && telemetry === undefined) {
+    logger.debug('No connectors or telemetry creds available; skipping sandbox seeding');
     return;
   }
 
-  const { env, markdown } = renderConnectorFiles(connectors);
+  const rendered = renderConnectorFiles(connectors);
+  const env = [telemetry?.env, rendered.env].filter((part) => part && part.length > 0).join('\n');
+  const markdown = [rendered.markdown, telemetry?.markdown]
+    .filter((part) => part && part.length > 0)
+    .join('\n');
 
-  await apiClient.writeFiles(conversationId, [
+  const files = [
     { path: '/workspace/.env', content: Buffer.from(env, 'utf8') },
     { path: '/workspace/connectors.md', content: Buffer.from(markdown, 'utf8') },
-  ]);
+    ...(telemetry !== undefined
+      ? [{ path: '/workspace/elastic.md', content: Buffer.from(renderElasticMd(), 'utf8') }]
+      : []),
+  ];
 
-  logger.info(`Sandbox seeded with ${connectors.length} connector(s)`);
+  await apiClient.writeFiles(conversationId, files);
+
+  logger.info(
+    `Sandbox seeded with ${connectors.length} connector(s)${
+      telemetry !== undefined ? ' and local ES telemetry creds' : ''
+    }`
+  );
 };

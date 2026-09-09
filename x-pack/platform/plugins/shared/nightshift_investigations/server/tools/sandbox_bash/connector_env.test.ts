@@ -5,7 +5,7 @@
  * 2.0.
  */
 
-import { renderConnectorFiles } from './connector_env';
+import { renderConnectorFiles, renderElasticMd, renderTelemetryFiles } from './connector_env';
 import type { SeedConnector } from './connector_env';
 
 const makeConnector = (overrides: Partial<SeedConnector> = {}): SeedConnector => ({
@@ -141,5 +141,36 @@ describe('renderConnectorFiles', () => {
     // Should not have any lines beyond the comment + ID + TYPE + blank line
     const lines = env.split('\n').filter(Boolean);
     expect(lines).toHaveLength(3); // comment, ID, TYPE
+  });
+});
+
+describe('renderTelemetryFiles', () => {
+  it('exports ELASTICSEARCH_URL and ELASTICSEARCH_API_KEY', () => {
+    const { env } = renderTelemetryFiles({
+      url: 'http://host.docker.internal:9200',
+      apiKey: 'encoded-key',
+    });
+    expect(env).toContain("export ELASTICSEARCH_URL='http://host.docker.internal:9200'");
+    expect(env).toContain("export ELASTICSEARCH_API_KEY='encoded-key'");
+  });
+
+  it('does not put the API key in markdown', () => {
+    const { markdown } = renderTelemetryFiles({
+      url: 'http://host.docker.internal:9200',
+      apiKey: 'super-secret-encoded-key',
+    });
+    expect(markdown).toContain('ELASTICSEARCH_API_KEY');
+    expect(markdown).not.toContain('super-secret-encoded-key');
+  });
+});
+
+describe('renderElasticMd', () => {
+  it('names the URL and API key env vars and does not embed a key value', () => {
+    const md = renderElasticMd();
+    expect(md).toContain('ELASTICSEARCH_URL');
+    expect(md).toContain('ELASTICSEARCH_API_KEY');
+    expect(md).toContain('$ELASTICSEARCH_URL');
+    expect(md).toContain('$ELASTICSEARCH_API_KEY');
+    expect(md).not.toMatch(/ApiKey [A-Za-z0-9+/=]{16,}/);
   });
 });

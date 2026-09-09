@@ -39,6 +39,7 @@ const createRepository = () => {
     get: jest.fn(),
     update: jest.fn(),
     find: jest.fn(),
+    delete: jest.fn(),
   };
   return {
     repository: new SavedObjectInvestigationRepository({ savedObjectsClient }),
@@ -222,6 +223,25 @@ describe('SavedObjectInvestigationRepository', () => {
         page: undefined,
         perPage: undefined,
       });
+    });
+  });
+
+  describe('delete()', () => {
+    it('deletes the saved object', async () => {
+      const { repository, savedObjectsClient } = createRepository();
+
+      await repository.delete('inv-1');
+
+      expect(savedObjectsClient.delete).toHaveBeenCalledWith(TYPE, 'inv-1');
+    });
+
+    it('ignores a missing saved object', async () => {
+      const { repository, savedObjectsClient } = createRepository();
+      savedObjectsClient.delete.mockRejectedValue(
+        SavedObjectsErrorHelpers.createGenericNotFoundError(TYPE, 'inv-1')
+      );
+
+      await expect(repository.delete('inv-1')).resolves.toBeUndefined();
     });
   });
 });

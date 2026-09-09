@@ -89,3 +89,55 @@ export const renderConnectorFiles = (connectors: SeedConnector[]): RenderedConne
     markdown: mdLines.join('\n'),
   };
 };
+
+/** Local-only ES telemetry creds. Values go in .env; markdown names the vars only. */
+export const renderTelemetryFiles = ({
+  url,
+  apiKey,
+}: {
+  url: string;
+  apiKey: string;
+}): RenderedConnectorFiles => {
+  return {
+    env: [
+      '# Local telemetry (dev hack — scoped ES API key)',
+      `export ELASTICSEARCH_URL=${shellQuote(url)}`,
+      `export ELASTICSEARCH_API_KEY=${shellQuote(apiKey)}`,
+      '',
+    ].join('\n'),
+    markdown: [
+      '## Elasticsearch telemetry (local hack)',
+      '- `ELASTICSEARCH_URL` — cluster URL reachable from the sandbox',
+      '- `ELASTICSEARCH_API_KEY` — read-only API key for logs-*/metrics-*/traces-*',
+      '',
+      'See `/workspace/elastic.md` for how to query.',
+      '',
+    ].join('\n'),
+  };
+};
+
+/** How to query cluster telemetry from the sandbox. Names env vars; never embeds secrets. */
+export const renderElasticMd = (): string =>
+  [
+    '# Elasticsearch telemetry',
+    '',
+    'Query this cluster from the sandbox with these environment variables.',
+    'They are already sourced for every `nightshift_sandbox_bash` command — do not hard-code values.',
+    '',
+    '- `ELASTICSEARCH_URL` — Elasticsearch hostname / URL',
+    '- `ELASTICSEARCH_API_KEY` — read-only API key (`Authorization: ApiKey …`)',
+    '',
+    'Readable indices: `logs-*`, `metrics-*`, `traces-*`.',
+    '',
+    '```bash',
+    'curl -s -H "Authorization: ApiKey $ELASTICSEARCH_API_KEY" \\',
+    '  -H "Content-Type: application/json" \\',
+    '  "$ELASTICSEARCH_URL/logs-*/_count"',
+    '',
+    'curl -s -H "Authorization: ApiKey $ELASTICSEARCH_API_KEY" \\',
+    '  -H "Content-Type: application/json" \\',
+    '  "$ELASTICSEARCH_URL/_query" \\',
+    '  -d \'{"query":"FROM logs-* | WHERE @timestamp >= \\"2026-01-01T00:00:00Z\\" AND @timestamp < \\"2026-01-01T01:00:00Z\\" | STATS count = COUNT(*) BY service.name | SORT count DESC | LIMIT 20"}\'',
+    '```',
+    '',
+  ].join('\n');
