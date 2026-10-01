@@ -44,6 +44,9 @@ const createInvestigationConfig = (sandboxKibanaConfig: string): ScoutServerConf
     );
   }
 
+  // Decision trees need Cortex, so learning trees during an eval turns both on.
+  const learnDecisionTrees = process.env.NIGHTSHIFT_EVAL_DECISION_TREES === 'true';
+
   return {
     ...safeTracing,
     kbnTestServer: {
@@ -54,7 +57,8 @@ const createInvestigationConfig = (sandboxKibanaConfig: string): ScoutServerConf
         '--xpack.task_manager.capacity=21',
         '--xpack.nightshift_investigations.enabled=true',
         '--feature_flags.overrides.nightshift.enabled=true',
-        '--xpack.nightshift_investigations.cortex.enabled=false',
+        `--xpack.nightshift_investigations.cortex.enabled=${learnDecisionTrees}`,
+        `--xpack.nightshift_investigations.decision_trees.enabled=${learnDecisionTrees}`,
         `--config=${sandboxKibanaConfig}`,
         ...(telemetryConfig ? [`--config=${telemetryConfig}`] : []),
         '--uiSettings.overrides.workflows:ui:enabled=true',

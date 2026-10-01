@@ -36,9 +36,21 @@ resolve() {
 host="$(resolve SANDBOX_API_HOST '.sandbox.host')"
 port="$(resolve SANDBOX_API_PORT '.sandbox.port')"
 api_key="$(resolve SANDBOX_API_KEY '.sandbox.apiKey')"
-certificate="$(resolve SANDBOX_CLIENT_CERT_PATH '.sandbox.ssl.certificate')"
-key="$(resolve SANDBOX_CLIENT_KEY_PATH '.sandbox.ssl.key')"
-ca="$(resolve SANDBOX_CA_CERT_PATH '.sandbox.ssl.certificateAuthorities')"
+# Profiles may carry PEM contents inline rather than file paths; Kibana only accepts paths, so inline
+# PEMs are written to an owner-only directory that outlives the hook (Kibana reads them later).
+pem_path() {
+  local name="$1" value="$2" dir="${HOME}/.elastic/sandbox-vault"
+  if [[ "$value" != -----BEGIN* ]]; then
+    printf '%s' "$value"
+    return
+  fi
+  (umask 077 && mkdir -p "$dir" && printf '%s\n' "$value" > "$dir/$name.pem")
+  printf '%s' "$dir/$name.pem"
+}
+
+certificate="$(pem_path certificate "$(resolve SANDBOX_CLIENT_CERT_PATH '.sandbox.ssl.certificate')")"
+key="$(pem_path key "$(resolve SANDBOX_CLIENT_KEY_PATH '.sandbox.ssl.key')")"
+ca="$(pem_path certificate_authorities "$(resolve SANDBOX_CA_CERT_PATH '.sandbox.ssl.certificateAuthorities')")"
 
 telemetry_url="$(resolve NIGHTSHIFT_SANDBOX_ELASTICSEARCH_URL '.nightshift.telemetry.url')"
 telemetry_key="$(resolve NIGHTSHIFT_SANDBOX_ELASTICSEARCH_API_KEY '.nightshift.telemetry.apiKey')"
