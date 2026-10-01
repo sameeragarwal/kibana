@@ -16,6 +16,7 @@ import { NIGHTSHIFT_INVESTIGATION_WORKFLOW_ID } from '@kbn/workflows/managed';
 import { evaluate } from '../../src/evaluate';
 import { loadInvestigationDataset } from './datasets';
 import { COMPLETION_LABELS, createCompletedWithTraceEvaluator } from './completed_with_trace';
+import { ROOT_CAUSE_EVALUATOR_NAME, createRootCauseCorrectEvaluator } from './root_cause_correct';
 import { INVESTIGATION_TIMEOUT_MS, fetchConversation, runInvestigation } from './task';
 import { assertSuccessfulSandboxCommand } from './trace_evidence';
 import type { InvestigationTaskOutput } from './types';
@@ -23,8 +24,20 @@ import type { InvestigationTaskOutput } from './types';
 evaluate.describe('Nightshift investigations: trace-only', { tag: tags.stateful.classic }, () => {
   evaluate(
     'persists a completion score and complete agent traces per investigation',
-    async ({ executorClient, connector, fetch, evalsClient, traceEsClient, repetitions, log }) => {
+    async ({
+      executorClient,
+      connector,
+      fetch,
+      evalsClient,
+      traceEsClient,
+      repetitions,
+      log,
+      evaluators,
+    }) => {
       const dataset = await loadInvestigationDataset(evalsClient);
+      const judgeRootCause = dataset.examples.some(({ output }) =>
+        Boolean(output?.reference_answer)
+      );
       // Matches the task slots the Scout config set reserves; edit both to change parallelism.
       const concurrency = 16;
       // Per batch: the investigation deadline, the grader's trace poll and the evaluator-trace
@@ -84,8 +97,12 @@ evaluate.describe('Nightshift investigations: trace-only', { tag: tags.stateful.
           metadata: { concurrency },
           task: (example) => runInvestigation(fetch, example),
         },
-        [createCompletedWithTraceEvaluator({ fetch, traceEsClient, systemInstructions })]
+        [
+          createCompletedWithTraceEvaluator({ fetch, traceEsClient, systemInstructions }),
+          ...(judgeRootCause ? [createRootCauseCorrectEvaluator(evaluators)] : []),
+        ]
       );
+      const evaluatorCount = judgeRootCause ? 2 : 1;
 
       const runs = Object.values(experiment.runs);
       expect(runs).toHaveLength(dataset.examples.length * repetitions);
@@ -96,17 +113,20 @@ evaluate.describe('Nightshift investigations: trace-only', { tag: tags.stateful.
         .poll(async () => (await evalsClient.getExperimentScores(experiment.id)).length, {
           timeout: 60_000,
         })
-        .toBe(runs.length);
+        .toBe(runs.length * evaluatorCount);
       const { examples } = await evalsClient.getExperimentDatasetExamples(
         experiment.id,
         experiment.datasetId
       );
-      const scores = examples.flatMap((example) => example.scores);
+      const allScores = examples.flatMap((example) => example.scores);
+      expect(allScores).toHaveLength(runs.length * evaluatorCount);
+      const scores = allScores.filter(({ evaluator }) => evaluator.name === 'completed_with_trace');
       expect(scores).toHaveLength(runs.length);
       const bundledFixtures =
         !process.env.NIGHTSHIFT_EXAMPLES_FILE && !process.env.NIGHTSHIFT_DATASET_NAME;
 
       const histogram = new Map<string, number>();
+      const rootCauseHistogram = new Map<string, number>();
       await pMap(
         runs,
         async (run) => {
@@ -139,6 +159,18 @@ evaluate.describe('Nightshift investigations: trace-only', { tag: tags.stateful.
           expect(score.evaluator.score).toBe(label === 'completed' ? 1 : 0);
           if (output.traceId) expect(score.evaluator.trace_id).not.toBe(output.traceId);
           histogram.set(label, (histogram.get(label) ?? 0) + 1);
+          const rootCauseLabel = allScores.find(
+            ({ evaluator, example, task }) =>
+              evaluator.name === ROOT_CAUSE_EVALUATOR_NAME &&
+              example.index === run.exampleIndex &&
+              task.repetition_index === run.repetition
+          )?.evaluator.label;
+          if (rootCauseLabel) {
+            rootCauseHistogram.set(
+              rootCauseLabel,
+              (rootCauseHistogram.get(rootCauseLabel) ?? 0) + 1
+            );
+          }
           if (bundledFixtures) {
             // The synthetic questions request a calculation, so an unavailable sandbox cannot pass.
             expect(output.conversation_id).toEqual(expect.any(String));
@@ -157,6 +189,7 @@ evaluate.describe('Nightshift investigations: trace-only', { tag: tags.stateful.
               conversation_id: output.conversation_id,
               trace_id: output.traceId,
               label,
+              root_cause: rootCauseLabel,
             })
           );
         },
@@ -167,14 +200,24 @@ evaluate.describe('Nightshift investigations: trace-only', { tag: tags.stateful.
           histogram.get('completed') ?? 0
         }/${runs.length} completed)`
       );
+      if (judgeRootCause) {
+        log.info(
+          `${ROOT_CAUSE_EVALUATOR_NAME} labels: ${JSON.stringify(
+            Object.fromEntries(rootCauseHistogram)
+          )} (accuracy ${rootCauseHistogram.get('correct') ?? 0}/${runs.length})`
+        );
+      }
       // Per-example failures stay visible as labels; only a run with nothing concluded fails here.
       expect(histogram.get('completed') ?? 0).toBeGreaterThan(0);
 
-      const evaluatorTraces = experiment.evaluationRuns
+      const completionRuns = experiment.evaluationRuns.filter(
+        ({ name }) => name === 'completed_with_trace'
+      );
+      const evaluatorTraces = completionRuns
         .map(({ traceId }) => traceId)
         .filter((traceId): traceId is string => Boolean(traceId));
-      expect(experiment.evaluationRuns).toHaveLength(runs.length);
-      expect(experiment.evaluationRuns.every(({ kind }) => kind === 'CODE')).toBe(true);
+      expect(completionRuns).toHaveLength(runs.length);
+      expect(completionRuns.every(({ kind }) => kind === 'CODE')).toBe(true);
       expect(evaluatorTraces).toHaveLength(runs.length);
       await pMap(
         evaluatorTraces,
