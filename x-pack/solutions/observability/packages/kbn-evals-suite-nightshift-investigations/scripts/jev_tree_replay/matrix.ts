@@ -8,6 +8,7 @@
 import pMap from 'p-map';
 import type { ToolingLog } from '@kbn/tooling-log';
 import { GOAL_PASS_THRESHOLD } from '../../evals/investigation/judges/scoring';
+import { bindEvidence } from './bind_evidence';
 import { judgeGoalPass, type GoalVerdict, type KibanaTarget } from './kibana_client';
 import { applyThreshold, composeWalkAnswer, walkTree } from './run_tree';
 import type { BranchChooser, CaseFixture, CompiledTree, NoneRule, WalkResult } from './types';
@@ -88,7 +89,7 @@ export const runMatrix = async ({
       const walk = await walkTree({
         tree,
         question: incident.question,
-        trajectory: incident.trajectory,
+        gather: async (node) => bindEvidence(node, incident.trajectory),
         chooser,
         symptomGate,
         noneRule,

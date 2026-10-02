@@ -5,14 +5,14 @@
  * 2.0.
  */
 
-import type { TrajectoryStep } from '../../evals/investigation/types';
-import { bindEvidence } from './bind_evidence';
+import type { DecisionNodeView } from '@kbn/nightshift-decision-trees';
 import { edgeOptions, nodeById, symptomRoots } from './compile_tree';
 import type {
   BoundEvidence,
   BranchChooser,
   CompiledTree,
   EdgeOption,
+  EscalationReason,
   Hop,
   NoneRule,
   WalkResult,
@@ -21,10 +21,18 @@ import type {
 const MAX_HOPS = 40;
 const EVIDENCE_WINDOW = 4;
 
+/** Produces the evidence for one evidence-gatherer node: replayed from a capture, or gathered live. */
+export type EvidenceGatherer = (node: DecisionNodeView) => Promise<BoundEvidence>;
+
+export interface ConfidencePolicy {
+  threshold: number;
+  margin: number;
+}
+
 export interface WalkInput {
   tree: CompiledTree;
   question: string;
-  trajectory: TrajectoryStep[];
+  gather: EvidenceGatherer;
   chooser: BranchChooser;
   /** When set, the first hop asks whether the alert matches the tree's symptom at all. */
   symptomGate: boolean;
@@ -33,20 +41,33 @@ export interface WalkInput {
    * the symptom gate and leaves in-tree escalation to the confidence threshold.
    */
   noneRule: NoneRule;
+  /**
+   * Escalates as soon as a branch falls below the policy, so a live walk stops gathering evidence.
+   * Replays leave it unset and apply thresholds afterwards with {@link applyThreshold}.
+   */
+  stopBelow?: ConfidencePolicy;
 }
 
+const isConfident = (
+  probabilities: Record<string, number>,
+  { threshold, margin }: ConfidencePolicy
+): boolean => {
+  const [best = 0, runnerUp = 0] = Object.values(probabilities).sort((a, b) => b - a);
+  return best >= threshold && best - runnerUp >= margin;
+};
+
 /**
- * Walks the tree taking the most probable edge at every branch, stopping only when the chooser
- * says none of the edges fit (off tree) or the graph dead-ends. Confidence thresholds are applied
- * afterwards by {@link applyThreshold}, so one walk serves a whole threshold sweep.
+ * Walks the tree taking the most probable edge at every branch, stopping when the chooser says
+ * none of the edges fit (off tree), confidence drops below `stopBelow`, or the graph dead-ends.
  */
 export const walkTree = async ({
   tree,
   question,
-  trajectory,
+  gather,
   chooser,
   symptomGate,
   noneRule,
+  stopBelow,
 }: WalkInput): Promise<WalkResult> => {
   const { view, goldPath } = tree;
   const hops: Hop[] = [];
@@ -55,7 +76,25 @@ export const walkTree = async ({
   let evidenceMissing = 0;
   let latency = 0;
 
-  const choose = async (nodeId: string, label: string, options: EdgeOption[]) => {
+  const finish = (
+    result: Pick<
+      WalkResult,
+      'outcome' | 'escalation_reason' | 'terminal_node_id' | 'terminal_label'
+    >
+  ): WalkResult => ({
+    ...result,
+    path,
+    hops,
+    evidence,
+    evidence_missing: evidenceMissing,
+    chooser_latency_ms: latency,
+  });
+
+  const choose = async (
+    nodeId: string,
+    label: string,
+    options: EdgeOption[]
+  ): Promise<{ target?: string; reason?: EscalationReason }> => {
     const decision = await chooser({
       question,
       decisionLabel: label,
@@ -63,17 +102,22 @@ export const walkTree = async ({
       options,
     });
     latency += decision.latency_ms;
+    const isEntry = nodeId === 'entry';
     const best = decision.chosen ? decision.probabilities[decision.chosen] ?? 0 : 0;
-    const honourNone = nodeId === 'entry' || noneRule === 'every_hop';
+    const honourNone = isEntry || noneRule === 'every_hop';
     const taken = !honourNone || best >= decision.none_probability ? decision.chosen : undefined;
     hops.push({ node_id: nodeId, options, decision, taken });
-    return options.find(({ key }) => key === taken)?.target_node_id;
+    if (!taken) return { reason: isEntry ? 'symptom_mismatch' : 'off_tree' };
+    if (stopBelow && !isConfident(decision.probabilities, stopBelow)) {
+      return { reason: isEntry ? 'symptom_mismatch' : 'low_confidence' };
+    }
+    return { target: options.find(({ key }) => key === taken)?.target_node_id };
   };
 
   const roots = symptomRoots(view);
-  let current: string | undefined;
+  let current: string | undefined = goldPath[0] ?? roots[0]?.node_id;
   if (symptomGate) {
-    current = await choose(
+    const { target, reason } = await choose(
       'entry',
       'Does this alert describe the same symptom as one of these known symptoms?',
       roots.map(({ node_id: id, label }, index) => ({
@@ -82,18 +126,8 @@ export const walkTree = async ({
         condition: label,
       }))
     );
-    if (!current) {
-      return {
-        outcome: 'escalated',
-        escalation_reason: 'symptom_mismatch',
-        path,
-        hops,
-        evidence_missing: 0,
-        chooser_latency_ms: latency,
-      };
-    }
-  } else {
-    current = goldPath[0] ?? roots[0]?.node_id;
+    if (reason) return finish({ outcome: 'escalated', escalation_reason: reason });
+    current = target;
   }
 
   while (current && path.length < MAX_HOPS) {
@@ -102,48 +136,29 @@ export const walkTree = async ({
     const node = nodeById(view, current);
     if (!node) break;
     if (node.node_type === 'evidence_gatherer') {
-      const bound = bindEvidence(node, trajectory);
+      const bound = await gather(node);
       if (bound.observations.length === 0) evidenceMissing++;
       evidence.push(bound);
     }
     const options = edgeOptions(view, current);
     if (options.length === 0) {
-      return {
-        outcome: node.node_type === 'end' ? 'resolved' : 'escalated',
-        ...(node.node_type === 'end'
-          ? { terminal_node_id: node.node_id, terminal_label: node.label }
-          : { escalation_reason: 'dead_end' as const }),
-        path,
-        hops,
-        evidence_missing: evidenceMissing,
-        chooser_latency_ms: latency,
-      };
+      return node.node_type === 'end'
+        ? finish({
+            outcome: 'resolved',
+            terminal_node_id: node.node_id,
+            terminal_label: node.label,
+          })
+        : finish({ outcome: 'escalated', escalation_reason: 'dead_end' });
     }
     if (options.length === 1) {
       current = options[0].target_node_id;
       continue;
     }
-    const next = await choose(node.node_id, node.label, options);
-    if (!next) {
-      return {
-        outcome: 'escalated',
-        escalation_reason: 'off_tree',
-        path,
-        hops,
-        evidence_missing: evidenceMissing,
-        chooser_latency_ms: latency,
-      };
-    }
-    current = next;
+    const { target, reason } = await choose(node.node_id, node.label, options);
+    if (reason) return finish({ outcome: 'escalated', escalation_reason: reason });
+    current = target;
   }
-  return {
-    outcome: 'escalated',
-    escalation_reason: 'dead_end',
-    path,
-    hops,
-    evidence_missing: evidenceMissing,
-    chooser_latency_ms: latency,
-  };
+  return finish({ outcome: 'escalated', escalation_reason: 'dead_end' });
 };
 
 /** Re-reads a walk under a confidence policy: escalate at the first hop below threshold or margin. */
@@ -156,9 +171,7 @@ export const applyThreshold = (
 } => {
   for (const [index, { decision, taken }] of walk.hops.entries()) {
     if (!taken) break;
-    const ranked = Object.values(decision.probabilities).sort((a, b) => b - a);
-    const [best = 0, runnerUp = 0] = ranked;
-    if (best < threshold || best - runnerUp < margin) {
+    if (!isConfident(decision.probabilities, { threshold, margin })) {
       return {
         outcome: 'escalated',
         escalation_reason:

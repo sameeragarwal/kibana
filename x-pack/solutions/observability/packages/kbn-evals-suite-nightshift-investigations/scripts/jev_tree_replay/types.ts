@@ -93,6 +93,7 @@ export interface WalkResult {
   escalation_reason?: EscalationReason;
   path: string[];
   hops: Hop[];
+  evidence: BoundEvidence[];
   evidence_missing: number;
   chooser_latency_ms: number;
 }

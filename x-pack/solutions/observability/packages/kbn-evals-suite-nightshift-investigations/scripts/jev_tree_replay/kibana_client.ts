@@ -5,6 +5,7 @@
  * 2.0.
  */
 
+import { Agent, fetch } from 'undici';
 import { GoalPassJudgePrompt } from '../../evals/investigation/judges/prompts';
 import { goalScorePassed, normalizeGoalScore } from '../../evals/investigation/judges/scoring';
 import type { BranchChooser } from './types';
@@ -23,12 +24,17 @@ export const DEFAULT_SCOUT_KIBANA: KibanaTarget = {
   password: 'changeme',
 };
 
+// Synchronous agent rounds hold the response for minutes; match Agent Builder's 15 minute socket.
+const LONG_REQUEST_MS = 15 * 60_000;
+const dispatcher = new Agent({ headersTimeout: LONG_REQUEST_MS, bodyTimeout: LONG_REQUEST_MS });
+
 export const kibanaFetch = async <T>(
   target: KibanaTarget,
   path: string,
   init: { method?: string; body?: unknown; apiVersion?: string } = {}
 ): Promise<T> => {
   const res = await fetch(`${target.url}${path}`, {
+    dispatcher,
     method: init.method ?? 'GET',
     headers: {
       Authorization: `Basic ${Buffer.from(`${target.username}:${target.password}`).toString(
