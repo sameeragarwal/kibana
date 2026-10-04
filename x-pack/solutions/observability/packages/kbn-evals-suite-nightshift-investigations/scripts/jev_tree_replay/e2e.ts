@@ -89,10 +89,12 @@ const treePrompt = (fixture: CaseFixture): string => {
 interface WriteUp {
   conclusion: string;
   summary: string;
+  input_tokens: number;
+  output_tokens: number;
 }
 
 /** One Sonnet call turns the decision path and gathered findings into a short RCA report. */
-const writeUp = async (
+export const writeUp = async (
   target: KibanaTarget,
   connectorId: string,
   { tree, walk, question }: { tree: CompiledTree; walk: WalkResult; question: string }
@@ -105,6 +107,7 @@ const writeUp = async (
     }));
   const response = await kibanaFetch<{
     toolCalls?: Array<{ function: { arguments: Partial<WriteUp> } }>;
+    tokens?: { prompt?: number; completion?: number };
   }>(target, '/internal/inference/chat_complete', {
     method: 'POST',
     body: {
@@ -146,7 +149,12 @@ const writeUp = async (
     },
   });
   const args = response.toolCalls?.[0]?.function.arguments ?? {};
-  return { conclusion: args.conclusion ?? walk.terminal_label ?? '', summary: args.summary ?? '' };
+  return {
+    conclusion: args.conclusion ?? walk.terminal_label ?? '',
+    summary: args.summary ?? '',
+    input_tokens: response.tokens?.prompt ?? 0,
+    output_tokens: response.tokens?.completion ?? 0,
+  };
 };
 
 /**

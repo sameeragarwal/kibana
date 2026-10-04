@@ -5,11 +5,14 @@
  * 2.0.
  */
 
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { run } from '@kbn/dev-cli-runner';
 import { compileTree, emitTreeModule } from './compile_tree';
-import { renderEndToEndSummary, runEndToEnd } from './e2e';
+import { renderEndToEndSummary, runEndToEnd, type ArmResult } from './e2e';
+import { renderTemplateSummary, runTemplateEndToEnd } from './e2e_templates';
+import { compileQueryTemplates, type CompiledQueries } from './query_templates';
+import { DEFAULT_TELEMETRY_CONFIG, readTelemetryTarget } from './telemetry_client';
 import { exportFixtures } from './export_fixtures';
 import { createJevChooser, readJevApiKey } from './jev_client';
 import { DEFAULT_SCOUT_KIBANA, createLlmChooser } from './kibana_client';
@@ -63,6 +66,83 @@ run(
       );
     }
     if (step === 'compile') return;
+
+    if (step === 'compile-queries' || step === 'e2e-templates') {
+      const telemetry = readTelemetryTarget(
+        flagsReader.string('telemetry-config') ?? DEFAULT_TELEMETRY_CONFIG,
+        Number(flagsReader.string('query-timeout') ?? 60) * 1000
+      );
+      const only = flagsReader.string('cases')?.split(',');
+      const selected = only
+        ? fixtures.filter(({ case_id: id }) => only.some((c) => id.includes(c)))
+        : fixtures;
+      const queriesDir = join(outDir, 'queries');
+      mkdirSync(queriesDir, { recursive: true });
+      const queries = new Map<string, CompiledQueries>();
+      for (const fixture of selected) {
+        const tree = compiled.get(fixture.case_id);
+        if (!tree) continue;
+        const file = join(queriesDir, `${fixture.case_id}.json`);
+        if (step === 'e2e-templates' && existsSync(file)) {
+          queries.set(fixture.case_id, JSON.parse(readFileSync(file, 'utf8')));
+          continue;
+        }
+        const compiledQueries = await compileQueryTemplates({
+          fixture,
+          tree,
+          target: DEFAULT_SCOUT_KIBANA,
+          connectorId,
+          telemetry,
+        });
+        writeFileSync(file, JSON.stringify(compiledQueries, null, 2));
+        queries.set(fixture.case_id, compiledQueries);
+        const statuses = compiledQueries.validation.map(({ status }) => status);
+        log.info(
+          `${fixture.case_id}: ${statuses.length} queries (${
+            statuses.filter((s) => s === 'rows').length
+          } with rows, ${statuses.filter((s) => s === 'error').length} errors), ${
+            compiledQueries.compile.llm_calls
+          } LLM calls`
+        );
+      }
+      if (step === 'compile-queries') return;
+
+      const policy = {
+        threshold: Number(flagsReader.string('threshold') ?? 0.5),
+        margin: Number(flagsReader.string('margin') ?? 0.1),
+      };
+      const repetitions = Number(flagsReader.string('repetitions') ?? 3);
+      const results = await runTemplateEndToEnd({
+        fixtures: selected,
+        compiled,
+        queries,
+        jev: createJevChooser(readJevApiKey()),
+        target: DEFAULT_SCOUT_KIBANA,
+        connectorId,
+        telemetry,
+        telemetryConnectorId:
+          flagsReader.string('telemetry-connector') ?? 'nightshift-evals-telemetry',
+        agentFallback: flagsReader.string('agent-fallback') !== 'false',
+        policy,
+        repetitions,
+        log,
+      });
+      const previousPath = join(outDir, 'e2e', 'results.json');
+      const previous = existsSync(previousPath)
+        ? (JSON.parse(readFileSync(previousPath, 'utf8')) as ArmResult[])
+        : [];
+      const templatesDir = join(outDir, 'e2e_templates');
+      mkdirSync(templatesDir, { recursive: true });
+      writeFileSync(join(templatesDir, 'results.json'), JSON.stringify(results, null, 2), {
+        mode: 0o600,
+      });
+      writeFileSync(
+        join(templatesDir, 'summary.md'),
+        renderTemplateSummary({ results, queries, previous, policy, repetitions })
+      );
+      log.success(`Wrote ${join(templatesDir, 'results.json')} and summary.md`);
+      return;
+    }
 
     if (step === 'e2e') {
       const policy = {
@@ -132,7 +212,9 @@ run(
       with Jev (TypeSafe System One) or a generative model choosing each branch.
 
       Steps: export (snapshot exploration runs from the Scout Kibana), compile, all (default:
-      replay matrix), e2e (live: Sonnet gathers evidence, Jev decides, vs generative baselines).
+      replay matrix), e2e (live: Sonnet gathers evidence, Jev decides, vs generative baselines),
+      compile-queries (once per tree: evidence steps to ES|QL templates), e2e-templates (live:
+      compiled ES|QL gathers evidence with no model, Jev decides).
     `,
     flags: {
       string: [
@@ -146,9 +228,17 @@ run(
         'margin',
         'cases',
         'telemetry-connector',
+        'telemetry-config',
+        'repetitions',
+        'agent-fallback',
+        'query-timeout',
       ],
       help: `
-        --step       export | compile | all | e2e (default all)
+        --step       export | compile | all | e2e | compile-queries | e2e-templates (default all)
+        --telemetry-config  compile-queries, e2e-templates: evals config with nightshift.telemetry
+        --repetitions       e2e-templates: walks per incident (default 3)
+        --agent-fallback    e2e-templates: false to skip the Sonnet agent when a step's queries all fail
+        --query-timeout     compile-queries, e2e-templates: seconds per ES|QL query (default 60)
         --threshold  e2e: escalate when the best branch is below this (default 0.5)
         --margin     e2e: escalate when best minus runner-up is below this (default 0.1)
         --cases      e2e: comma-separated case id substrings to run (default all)
