@@ -322,6 +322,41 @@ synthetic execution continues to need no telemetry connector. The former `remote
 `NIGHTSHIFT_REMOTE_EXAMPLES_FILE` are replaced by this shared file workflow. Grading, snapshot
 provisioning and micro-evals are separate follow-ups.
 
+## Connector probes
+
+`NIGHTSHIFT_DATASETS=connector-probe` asks the hidden **Nightshift Assistant** agent
+(`nightshift.assistant`) each question in one `POST /api/agent_builder/converse` call. The
+assistant has the investigator's tools, connectors, Cortex and Semantic Memory hooks, but a short
+direct-answer prompt that reads the workspace `.md` files only when needed, and no decision trees,
+so a probe takes a few model turns instead of a full investigation. Use it to iterate quickly on
+how the agent queries Elasticsearch. Cortex and memory optimize still run after each reply, so
+probes update the space's wiki and memories like investigations do.
+
+It is opt-in: unset and `all` never select it, because it needs the
+[remote telemetry](#remote-telemetry-investigations) settings as well as sandbox credentials.
+
+```bash
+NIGHTSHIFT_DATASETS=connector-probe \
+  node scripts/evals start --suite nightshift-investigations --profile dev-vault --repetitions 1 \
+  --model eis-anthropic-claude-5-5-sonnet --judge eis-anthropic-claude-4-6-sonnet
+```
+
+The bundled [`es_connector_quick.json`](evals/connector_probe/es_connector_quick.json) holds 20
+probes covering cross-cluster search, less common ES|QL and Query DSL features, and failure patterns
+such as unknown remotes, unknown columns, capped totals and forbidden calls. Point
+`NIGHTSHIFT_PROBE_EXAMPLES_FILE` at another file in the [same format](#trace-only-investigations)
+to run a subset; give it its own `dataset` name so it does not replace the stored 20-case dataset.
+
+| Evaluator             | Kind | Scores                                                                       |
+| --------------------- | ---- | ---------------------------------------------------------------------------- |
+| `connector_used`      | CODE | At least one `nightshift_sandbox_bash` call passed a `connector_id`.         |
+| `within_time_budget`  | CODE | The `converse` call finished within `NIGHTSHIFT_PROBE_TIME_BUDGET_S` (30).   |
+| `reference_behaviour` | LLM  | The reply and tool calls match the example's `output.reference_answer`.      |
+
+Set `SELECTED_EVALUATORS=connector_used,within_time_budget` to skip the judge. Each run logs its
+case, duration, tool-call count, conversation and trace ids and scores. A failed `converse` call
+fails the test; low scores do not.
+
 ## Deferred sandbox session isolation
 
 The shared sandbox workspace is scoped to a space and conversation, not to an agent's connector
@@ -485,7 +520,9 @@ against.
 
 | Variable              | Effect                                                                                                                                                                                                                                                                                              |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NIGHTSHIFT_DATASETS` | Comma-separated dataset ids (whitespace trimmed). Smoke dataset ids such as `synthetic-smoke` select seeded evals; `trace-only` selects the file-driven investigations; they can be combined, e.g. `synthetic-smoke,trace-only`. Unset or `all` runs every eval when sandbox credentials are present, except that a stored `NIGHTSHIFT_DATASET_NAME` defaults to trace-only when selection is unset. Without them, unset runs only smoke with a warning, while an explicit `all` or `trace-only` fails before any test runs, even when Scout is reused. Unknown ids fail early. |
+| `NIGHTSHIFT_DATASETS` | Comma-separated dataset ids (whitespace trimmed). Smoke dataset ids such as `synthetic-smoke` select seeded evals; `trace-only` selects the file-driven investigations; they can be combined, e.g. `synthetic-smoke,trace-only`. Unset or `all` runs every eval when sandbox credentials are present, except that a stored `NIGHTSHIFT_DATASET_NAME` defaults to trace-only when selection is unset. Without them, unset runs only smoke with a warning, while an explicit `all` or `trace-only` fails before any test runs, even when Scout is reused. `connector-probe` selects the [connector probes](#connector-probes), which unset and `all` never include. Unknown ids fail early. |
+| `NIGHTSHIFT_PROBE_EXAMPLES_FILE` | Examples file for `connector-probe`; defaults to `evals/connector_probe/es_connector_quick.json`. See [connector probes](#connector-probes). |
+| `NIGHTSHIFT_PROBE_TIME_BUDGET_S` | Seconds a probe may take before `within_time_budget` scores 0 (default 30). |
 | `SELECTED_EVALUATORS` | Standard `@kbn/evals` filter, by evaluator name (`documents_restored`, `timestamps_replayed`).                                                                                                                                                                                                      |
 | `GCS_CREDENTIALS`     | Service account JSON Elasticsearch uses to reach the seed-data bucket. Read access is enough to run the suite.                                                                                                                                                                                      |
 

@@ -1,0 +1,187 @@
+{
+  "dataset": "nightshift/es-connector-quick",
+  "description": "Low-budget probes of the remote Elasticsearch telemetry connector: cross-cluster search, esoteric query types and common query failure patterns. Each case is a bounded capability check, not an incident.",
+  "tags": ["es-connector", "quick", "ccs"],
+  "examples": [
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 3 Elasticsearch commands, no decision trees, no source code, one hypothesis at most. List the remote clusters configured on the telemetry cluster with GET /_remote/info. For each remote, report its name, whether it is connected, its mode (sniff or proxy) and skip_unavailable. If no remotes are configured, say so explicitly. Quote any error verbatim."
+      },
+      "output": {
+        "reference_answer": "The agent calls GET /_remote/info through the telemetry connector (connector_id passed) and reports each remote with connected, mode and skip_unavailable taken from the response, or states that no remotes are configured. It does not invent remotes and does not use wildcard remote names."
+      },
+      "metadata": { "case_id": "ccs-remote-discovery", "category": "remote-cluster" }
+    },
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. Pick one connected remote (from the readable-indices guidance or GET /_remote/info). Using ES|QL, count documents in <remote>:logs-* for the last 15 minutes. You must name the remote explicitly; do not use a wildcard remote such as *:logs-*. Report the exact query you ran, the remote you chose and the count."
+      },
+      "output": {
+        "reference_answer": "The agent selects a concrete connected remote, runs an ES|QL query of the form FROM <remote>:logs-* | WHERE @timestamp >= NOW() - 15 minutes | STATS COUNT(*), and reports the query text and the returned count. It never uses *:logs-* or an unbounded time range. If no remote is connected, it says so instead of querying."
+      },
+      "metadata": { "case_id": "ccs-explicit-remote-index", "category": "remote-cluster" }
+    },
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. In a single ES|QL request with include_ccs_metadata set to true, query both the local cluster and one named remote (FROM logs-*,<remote>:logs-*) for the last 15 minutes and count documents per cluster. Report the per-cluster counts and the _clusters section of the response (status, took, skipped or failed shards). If one side has no data or fails, say which."
+      },
+      "output": {
+        "reference_answer": "The agent sends one ES|QL _query request with include_ccs_metadata: true mixing local and remote patterns, bounded to 15 minutes. It reports counts per cluster (for example by grouping on _index or reading _clusters.details) and the status of each cluster from the _clusters metadata, explicitly calling out skipped, partial or failed clusters rather than summing them silently."
+      },
+      "metadata": { "case_id": "ccs-mixed-local-remote-metadata", "category": "remote-cluster" }
+    },
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 3 Elasticsearch commands, no decision trees, no source code. Run an ES|QL count over the last 15 minutes against the remote pattern nightshift_does_not_exist:logs-*. Report exactly what Elasticsearch returned. Do not substitute another remote and do not report zero documents unless Elasticsearch actually returned a successful zero count."
+      },
+      "output": {
+        "reference_answer": "The query fails because the remote nightshift_does_not_exist is not configured (for example a no_such_remote_cluster_exception or an equivalent error). The agent quotes the error, states that the remote does not exist, and does not claim the count is zero or silently query a different remote."
+      },
+      "metadata": { "case_id": "ccs-unknown-remote-error", "category": "failure-pattern" }
+    },
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 3 Elasticsearch commands, no decision trees, no source code. Use GET /_resolve/cluster/<remote>:logs-* for one named remote to check whether it is reachable and whether the pattern matches any indices. Then use GET /_resolve/index/<remote>:logs-* to list up to 10 matching data streams. Report reachability, skip_unavailable, whether indices matched, and the data stream names."
+      },
+      "output": {
+        "reference_answer": "The agent calls _resolve/cluster and _resolve/index with an explicitly named remote (no wildcard remote), reports connected/skip_unavailable/matching_indices from _resolve/cluster, and lists at most 10 data streams from _resolve/index. Errors are quoted rather than hidden."
+      },
+      "metadata": { "case_id": "ccs-resolve-cluster", "category": "remote-cluster" }
+    },
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 3 Elasticsearch commands, no decision trees, no source code. Count logs-* documents for the last 15 minutes on up to 5 connected remotes, querying them in parallel in a single sandbox command with a per-request --max-time of 30 seconds. Report one line per remote with its count or its error. A remote that times out or errors must be listed as failed, not as zero."
+      },
+      "output": {
+        "reference_answer": "The agent fans out in one sandbox command (for example xargs -P or background jobs) with a short per-request timeout, prefixes each result with its remote name, and reports per-remote counts. Failed or timed-out remotes are reported as failures with their error text, never folded into a zero count. It does not loop sequentially over many remotes."
+      },
+      "metadata": { "case_id": "ccs-parallel-fanout-partial-failure", "category": "remote-cluster" }
+    },
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. Pick one specific logs data stream (resolve candidates first; do not query a broad logs-*). Using ES|QL, produce a 5-minute time histogram of document counts for the last hour with BUCKET(@timestamp, 5 minutes). Report the query and the 12 buckets with counts, noting any empty buckets."
+      },
+      "output": {
+        "reference_answer": "The agent narrows to one concrete data stream, runs STATS count = COUNT(*) BY bucket = BUCKET(@timestamp, 5 minutes) with a one-hour @timestamp bound, sorts by bucket, and reports the buckets. It recognises that ES|QL omits empty buckets and says which intervals had no documents rather than claiming 12 rows were returned."
+      },
+      "metadata": { "case_id": "esql-bucket-histogram", "category": "esoteric-query" }
+    },
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. For one specific logs data stream over the last hour, compute in a single ES|QL STATS command: total documents, documents whose log.level is error (case-insensitive), and documents whose message contains the substring timeout. Use conditional aggregation (COUNT(*) WHERE ...) and the correct ES|QL wildcard syntax. Report the query and the three numbers."
+      },
+      "output": {
+        "reference_answer": "The agent writes one STATS with COUNT(*) plus COUNT(*) WHERE TO_LOWER(log.level) == \"error\" and COUNT(*) WHERE message LIKE \"*timeout*\" (or an equivalent MATCH/MATCH_PHRASE), using * not % for LIKE wildcards and handling case sensitivity explicitly. It reports the three counts and the query. If log.level or message is missing, it reports that from the error or field caps rather than guessing."
+      },
+      "metadata": { "case_id": "esql-conditional-count-like", "category": "esoteric-query" }
+    },
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. On one specific logs data stream over the last hour, compare full-text search approaches in ES|QL: count documents matching MATCH(message, \"connection refused\"), MATCH_PHRASE(message, \"connection refused\") and message LIKE \"*connection refused*\". Report the three counts and explain briefly why they differ."
+      },
+      "output": {
+        "reference_answer": "The agent runs the three variants with a one-hour bound on a concrete data stream and reports the counts. It explains that MATCH is an analysed term query (any term, so typically the largest), MATCH_PHRASE requires the terms in order, and LIKE is a case-sensitive wildcard on the raw value (and may fail or behave differently on text vs keyword fields). Any unsupported-function or field-type error is quoted."
+      },
+      "metadata": { "case_id": "esql-fulltext-match-variants", "category": "esoteric-query" }
+    },
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. Determine whether an ES|QL LOOKUP JOIN is possible on this cluster: find any index with index.mode set to lookup (check settings on a narrow pattern, not every index). If one exists, run a LOOKUP JOIN from one logs data stream over the last 15 minutes with LIMIT 5. If none exists, report that and do not attempt to create one."
+      },
+      "output": {
+        "reference_answer": "The agent checks for a lookup-mode index with a bounded request and either runs a small LOOKUP JOIN that returns rows, or reports that no lookup index exists and that LOOKUP JOIN therefore cannot run. It does not attempt writes (index creation) with the read-only key and does not claim a join succeeded without showing its output."
+      },
+      "metadata": { "case_id": "esql-lookup-join-precondition", "category": "esoteric-query" }
+    },
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. Using the Query DSL _search API (not ES|QL), list every distinct service.name in traces-* for the last hour with a composite aggregation of page size 10, following after_key until all pages are read (stop after 5 pages). Report how many distinct services you found, how many pages you read and whether pagination was complete."
+      },
+      "output": {
+        "reference_answer": "The agent uses size: 0 with a composite aggregation on service.name, a one-hour @timestamp range filter, and follows after_key across requests (or in one scripted loop) until after_key is absent or the 5-page limit is reached. It reports the distinct count, pages read and whether results were truncated by the page limit. It does not use a terms aggregation with an arbitrary large size as a substitute."
+      },
+      "metadata": { "case_id": "dsl-composite-agg-pagination", "category": "esoteric-query" }
+    },
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. For one specific logs data stream over the last 24 hours, report the exact total document count. Then explain whether a plain _search response's hits.total would have been exact, and how you would page past the first 10,000 hits (point in time plus search_after, not from/size). Show the request you used for the exact count."
+      },
+      "output": {
+        "reference_answer": "The agent obtains an exact count with _count, track_total_hits: true, or ES|QL COUNT(*), bounded to 24 hours on a narrow data stream. It notes that _search caps hits.total at 10,000 with relation gte by default, and that deep pagination needs a point in time with search_after because from + size cannot exceed index.max_result_window. It does not report a capped 10,000 as the true total."
+      },
+      "metadata": { "case_id": "dsl-total-hits-deep-pagination", "category": "failure-pattern" }
+    },
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. For the single busiest service in traces-* over the last hour, compute p50, p95 and p99 of transaction duration. Discover the correct duration field first (for example with _field_caps on a narrow pattern) instead of assuming its name, and state the unit. Report the field, unit, service and the three percentiles."
+      },
+      "output": {
+        "reference_answer": "The agent finds the busiest service with a bounded count, discovers the duration field (for example transaction.duration.us for Elastic APM or span duration fields for OpenTelemetry data) via field caps or a LIMIT 0 schema query, and computes percentiles with ES|QL PERCENTILE or a DSL percentiles aggregation. It reports the unit correctly (microseconds vs nanoseconds) and does not mislabel units."
+      },
+      "metadata": { "case_id": "percentiles-field-discovery-units", "category": "esoteric-query" }
+    },
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. Using _field_caps on logs-* restricted to one remote or one narrow data stream pattern, find one field that has conflicting types across indices. Then run an ES|QL query over the last 15 minutes that reads that field without a type error (for example by converting it with TO_STRING). Report the field, its conflicting types and the working query. If no conflicts exist, say so."
+      },
+      "output": {
+        "reference_answer": "The agent calls _field_caps with a narrow index pattern and identifies a field with more than one type (or reports none). It shows that reading the field directly fails or returns unsupported, then fixes it with an explicit conversion function such as TO_STRING and reports the working query. It does not hide the type error."
+      },
+      "metadata": { "case_id": "esql-conflicting-field-types", "category": "failure-pattern" }
+    },
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. On one specific logs or traces data stream over the last hour, find a multi-valued field (for example tags or a labels array). Using ES|QL, report MV_COUNT statistics for it and the top 5 individual values after MV_EXPAND. Report the field and the query."
+      },
+      "output": {
+        "reference_answer": "The agent identifies a multi-valued field, uses MV_COUNT to show that documents carry several values, and uses MV_EXPAND before STATS ... BY to count individual values, with a time bound and LIMIT. It explains that grouping without MV_EXPAND groups on each value implicitly or the whole set depending on the command, and does not double-count without noting it."
+      },
+      "metadata": { "case_id": "esql-multivalue-expand", "category": "esoteric-query" }
+    },
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 3 Elasticsearch commands, no decision trees, no source code. Read the cluster settings with GET /_cluster/settings and the ILM policy of one logs data stream. The telemetry API key is read-only, so some of these calls may be forbidden. Report which calls succeeded, which failed, and quote any security_exception verbatim, including the missing privilege."
+      },
+      "output": {
+        "reference_answer": "The agent makes the calls with the connector, reports each one's outcome, and for any 403 quotes the security_exception and names the missing privilege (for example monitor or manage_ilm). It does not treat a forbidden response as an empty result, does not try to work around the restriction, and does not print credentials."
+      },
+      "metadata": { "case_id": "authz-forbidden-call-handling", "category": "failure-pattern" }
+    },
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 3 Elasticsearch commands, no decision trees, no source code. Run an ES|QL query on one specific logs data stream for the last 15 minutes that groups by the field service.nightshift_missing_field. Report exactly what Elasticsearch returned. Do not report that there is no data unless the query actually succeeded with zero rows."
+      },
+      "output": {
+        "reference_answer": "The query fails with a verification_exception for an unknown column service.nightshift_missing_field. The agent quotes the error and states the field does not exist in that data stream. It does not describe the outcome as no data and does not pipe the error into jq so that it disappears."
+      },
+      "metadata": { "case_id": "esql-unknown-column-not-empty", "category": "failure-pattern" }
+    },
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. Count documents in one specific logs data stream between 09:00 and 10:00 America/New_York yesterday. State the exact UTC bounds you used, whether daylight saving time was in effect, and the count. Show the query."
+      },
+      "output": {
+        "reference_answer": "The agent converts the New York window to UTC correctly for yesterday's date (UTC-4 during daylight saving time, UTC-5 otherwise), states the UTC bounds and DST status, and runs a bounded count with those bounds. It does not query 09:00-10:00 UTC or ignore the time zone."
+      },
+      "metadata": { "case_id": "timezone-window-conversion", "category": "failure-pattern" }
+    },
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 3 Elasticsearch commands, no decision trees, no source code. Report the 10 largest logs data streams by document count on the local cluster (or on one named remote if the local cluster has none). Keep the response compact: use a text or filtered format and return only the top 10, not the full listing. Report name, document count and store size."
+      },
+      "output": {
+        "reference_answer": "The agent uses a compact listing such as _cat/indices or _data_stream/_stats with format=txt or column/sort/limit selection (or jq after checking for errors), returns only the top 10 rows, and reports name, document count and size. It does not dump the full index listing into the conversation."
+      },
+      "metadata": { "case_id": "compact-large-listing", "category": "failure-pattern" }
+    },
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. Count documents over the last 24 hours across all of logs-* on the local cluster. If the query is slow or times out, do not retry the same broad query: narrow it by filtering on data_stream.dataset first or split the window, then report the count you could compute, what you narrowed, and whether the original query timed out."
+      },
+      "output": {
+        "reference_answer": "The agent bounds the request with a @timestamp range and curl --max-time. If the broad query succeeds it reports the count. If it times out, it reports the timeout honestly, then narrows by data_stream.dataset or splits the window, and reports a clearly labelled partial or reconstructed count. It never presents a timed-out or partial result as complete."
+      },
+      "metadata": { "case_id": "broad-pattern-timeout-recovery", "category": "failure-pattern" }
+    }
+  ]
+}
