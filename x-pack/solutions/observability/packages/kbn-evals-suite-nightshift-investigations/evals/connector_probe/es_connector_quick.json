@@ -89,7 +89,7 @@
     },
     {
       "input": {
-        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. For one specific logs data stream over the last hour, compute in a single ES|QL STATS command: total documents, documents whose log.level is error (case-insensitive), and documents whose message contains the substring timeout. Use conditional aggregation (COUNT(*) WHERE ...) and the correct ES|QL wildcard syntax. Report the query and the three numbers."
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. For one specific logs data stream that maps log.level (check with _field_caps) over the last hour, compute in a single ES|QL STATS command: total documents, documents whose log.level is error (case-insensitive), and documents whose message contains the substring timeout. Use conditional aggregation (COUNT(*) WHERE ...) and the correct ES|QL wildcard syntax. Report the query and the three numbers."
       },
       "output": {
         "reference_answer": "The agent writes one STATS with COUNT(*) plus COUNT(*) WHERE TO_LOWER(log.level) == \"error\" and COUNT(*) WHERE message LIKE \"*timeout*\" (or an equivalent MATCH/MATCH_PHRASE), using * not % for LIKE wildcards and handling case sensitivity explicitly. It reports the three counts and the query. If log.level or message is missing, it reports that from the error or field caps rather than guessing."
@@ -101,10 +101,10 @@
     },
     {
       "input": {
-        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. On one specific logs data stream over the last hour, first sample a few message values and pick a two-word phrase that actually occurs in them. Then compare full-text search approaches in ES|QL for that phrase: count documents matching MATCH(message, \"<phrase>\"), MATCH_PHRASE(message, \"<phrase>\") and message LIKE \"*<phrase>*\". Report the phrase, the three counts and explain briefly why they differ."
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. On one specific logs data stream over the last hour, first sample a few message values and pick a two-word phrase that occurs in some but not all of them. Then compare full-text search approaches in ES|QL for that phrase: count documents matching MATCH(message, \"<phrase>\"), MATCH_PHRASE(message, \"<phrase>\") and message LIKE \"*<phrase>*\". Report the phrase, the three counts and explain briefly why they differ."
       },
       "output": {
-        "reference_answer": "The agent picks a phrase from sampled data so at least one variant returns documents, runs the three variants with a one-hour bound on a concrete data stream and reports the counts. It explains that MATCH is analysed and matches any of the terms (typically the largest count), MATCH_PHRASE requires the terms adjacent and in order, and LIKE is a case-sensitive wildcard on the raw value. Any unsupported-function or field-type error is quoted."
+        "reference_answer": "The agent picks a phrase from sampled data so at least one variant returns documents and not every document matches, runs the three variants with a one-hour bound on a concrete data stream and reports the counts. It explains that MATCH is analysed and matches any of the terms (typically the largest count), MATCH_PHRASE requires the terms adjacent and in order, and LIKE is a case-sensitive wildcard on the raw value. Any unsupported-function or field-type error is quoted."
       },
       "metadata": {
         "case_id": "esql-fulltext-match-variants",
@@ -185,7 +185,7 @@
     },
     {
       "input": {
-        "question": "Connector capability probe, not an incident. Budget: at most 3 Elasticsearch commands, no decision trees, no source code. Read the cluster settings with GET /_cluster/settings and the ILM policy of one logs data stream. The telemetry API key is read-only, so some of these calls may be forbidden. Report which calls succeeded, which failed, and quote any security_exception verbatim, including the missing privilege."
+        "question": "Connector capability probe, not an incident. Budget: at most 3 Elasticsearch commands, no decision trees, no source code. Read the cluster settings with GET /_cluster/settings. Then find the ILM policy name of one local logs data stream with GET /_data_stream/<name> and read that policy definition with GET /_ilm/policy/<policy>. The telemetry API key is read-only, so some of these calls may be forbidden. Report which calls succeeded, which failed, and quote any security_exception verbatim, including the missing privilege."
       },
       "output": {
         "reference_answer": "The agent makes the calls with the connector, reports each one's outcome, and for any 403 quotes the security_exception and names the missing privilege (for example monitor or manage_ilm). It does not treat a forbidden response as an empty result, does not try to work around the restriction, and does not print credentials."
@@ -233,7 +233,7 @@
     },
     {
       "input": {
-        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. In one logs data stream over the last 15 minutes, find a high-cardinality identifier field (for example a request, trace or span id; check with _field_caps). Report exactly how many distinct values it has. Note that an ES|QL STATS ... BY without LIMIT returns at most 1000 rows with only a Warning header; do not report the number of returned rows as the number of distinct values."
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. In logging-aws-us-east-2:logs-generic.otel-default over the last 15 minutes, find its request identifier field with _field_caps. Report exactly how many distinct values it has. Note that an ES|QL STATS ... BY without LIMIT returns at most 1000 rows with only a Warning header; do not report the number of returned rows as the number of distinct values."
       },
       "output": {
         "reference_answer": "The agent computes the distinct count with COUNT_DISTINCT (noting it is approximate at high cardinality) or by counting groups in a second STATS, rather than counting the rows of a grouped query. If it runs a grouped query, it recognises the 1000-row default limit (or the Warning header) and does not present 1000 as the answer."
@@ -248,7 +248,7 @@
         "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. Use the data stream logging-aws-us-east-2:logs-generic.otel-default. Over the last 15 minutes, compute in ES|QL the percentage of documents with http.response.status_code of 400 or above, out of documents that have a status code. Check the field type first: if it is keyword, a numeric comparison fails and must be converted. Make sure the percentage is not truncated by integer division. Report the field type, the query, the counts and the percentage."
       },
       "output": {
-        "reference_answer": "The agent checks the field type (for example with _field_caps), converts a keyword status code with TO_INTEGER (or compares in the matching type) and computes the ratio with a floating-point conversion such as TO_DOUBLE before dividing. It reports counts and a percentage consistent with them. A result of 0 from integer division, or a status comparison that silently treats codes as strings, is not acceptable unless the agent identifies and corrects it. Type errors are quoted."
+        "reference_answer": "The agent checks the field type (for example with _field_caps), converts a keyword status code with TO_INTEGER (or compares in the matching type) and computes the ratio in floating point (for example 100.0 * errors / total or TO_DOUBLE). It reports counts and a percentage consistent with them. A result of 0 from integer division, or a status comparison that silently treats codes as strings, is not acceptable unless the agent identifies and corrects it. Type errors are quoted."
       },
       "metadata": {
         "case_id": "esql-keyword-status-ratio",
@@ -269,10 +269,10 @@
     },
     {
       "input": {
-        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. Using _field_caps on one narrow logs data stream, find a field whose name contains a character that needs quoting in ES|QL, such as \"/\" or \"-\" (Kubernetes label fields often do). Group the last hour of documents by that field and report the top 5 values. Report the field name and the exact query."
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. Using _field_caps on logging-aws-us-east-2:logs-ingress-nginx.log-default, find a Kubernetes label field whose name contains a character that needs quoting in ES|QL, such as \"/\" or \"-\". Group the last hour of documents by that field and report the top 5 values. Report the field name and the exact query."
       },
       "output": {
-        "reference_answer": "The agent discovers such a field from _field_caps and quotes it with backticks in ES|QL. If an unquoted attempt fails (for example \"/\" parsed as division, reported as unknown columns), it quotes the error and fixes the query rather than giving up or choosing a different field without explanation. It reports the top values with a time bound and LIMIT."
+        "reference_answer": "The agent discovers such a field from _field_caps and quotes it with backticks in ES|QL. If an unquoted attempt fails (for example \"/\" parsed as division, reported as unknown columns), it quotes the error and fixes the query rather than giving up or choosing a different field without explanation. It reports the top values with a time bound and LIMIT. A single distinct value is an acceptable result."
       },
       "metadata": {
         "case_id": "esql-backtick-field-names",

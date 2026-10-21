@@ -15,7 +15,7 @@ import {
   NIGHTSHIFT_ASSISTANT_AGENT_TYPE_ID,
 } from '../agents/assistant';
 
-/** Ensures the Nightshift assistant agent; it stays out of the agent picker but is callable by id. */
+/** Ensures the Nightshift assistant agent; visible in the Agent Builder agent picker. */
 export const installAssistantAgent = async ({
   agentBuilder,
   spaceId,
@@ -28,7 +28,7 @@ export const installAssistantAgent = async ({
   await agentBuilder.agents.ensure({
     spaceId,
     availability,
-    hidden: true,
+    hidden: false,
     agent: {
       id: NIGHTSHIFT_ASSISTANT_AGENT_ID,
       type: NIGHTSHIFT_ASSISTANT_AGENT_TYPE_ID,
