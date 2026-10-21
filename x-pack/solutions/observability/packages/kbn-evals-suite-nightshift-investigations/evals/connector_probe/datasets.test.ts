@@ -14,7 +14,7 @@ describe('readConnectorProbeDataset', () => {
 
     expect(dataset.name).toBe('nightshift/es-connector-quick');
     expect(dataset.tags).toEqual(expect.arrayContaining(['nightshift', 'connector-probe']));
-    expect(dataset.examples).toHaveLength(20);
+    expect(dataset.examples).toHaveLength(25);
     for (const { output } of dataset.examples) {
       expect(extractReferenceAnswer(output)).toEqual(expect.any(String));
     }

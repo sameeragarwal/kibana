@@ -5,21 +5,27 @@
   "examples": [
     {
       "input": {
-        "question": "Connector capability probe, not an incident. Budget: at most 3 Elasticsearch commands, no decision trees, no source code, one hypothesis at most. List the remote clusters configured on the telemetry cluster with GET /_remote/info. For each remote, report its name, whether it is connected, its mode (sniff or proxy) and skip_unavailable. If no remotes are configured, say so explicitly. Quote any error verbatim."
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. Submit an ES|QL count over the last hour across every logging remote (FROM logging-*:logs-*) with POST /_query/async, a short wait_for_completion_timeout and a keep_alive of a few minutes. If it is still running, poll GET /_query/async/<id> until it finishes, then delete it with DELETE /_query/async/<id>. Report the count, whether the result was partial (is_partial), how many polls you needed, and whether the delete was acknowledged."
       },
       "output": {
-        "reference_answer": "The agent calls GET /_remote/info through the telemetry connector (connector_id passed) and reports each remote with connected, mode and skip_unavailable taken from the response, or states that no remotes are configured. It does not invent remotes and does not use wildcard remote names."
+        "reference_answer": "The agent submits the query asynchronously, keeps the returned id and polls it instead of resubmitting, and reports the final count. It reports is_partial accurately; a partial result is described as partial (some remotes or shards missing), not as a complete total. It deletes the async query and reports the acknowledgement or quotes the error. Quoting a privilege or async error verbatim is an acceptable outcome for any step."
       },
-      "metadata": { "case_id": "ccs-remote-discovery", "category": "remote-cluster" }
+      "metadata": {
+        "case_id": "esql-async-partial-results",
+        "category": "remote-cluster"
+      }
     },
     {
       "input": {
-        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. Pick one connected remote (from the readable-indices guidance or GET /_remote/info). Using ES|QL, count documents in <remote>:logs-* for the last 15 minutes. You must name the remote explicitly; do not use a wildcard remote such as *:logs-*. Report the exact query you ran, the remote you chose and the count."
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. Using ES|QL with include_ccs_metadata set to true, count the last 15 minutes of one logs data stream (for example logs-ingress-nginx.log-default) across every remote whose name matches logging-aws-* (FROM logging-aws-*:<data stream> METADATA _index), grouped by remote cluster. Report how many remotes matched the name pattern, the per-remote counts, and which matched remotes returned no documents or were skipped according to _clusters."
       },
       "output": {
-        "reference_answer": "The agent selects a concrete connected remote, runs an ES|QL query of the form FROM <remote>:logs-* | WHERE @timestamp >= NOW() - 15 minutes | STATS COUNT(*), and reports the query text and the returned count. It never uses *:logs-* or an unbounded time range. If no remote is connected, it says so instead of querying."
+        "reference_answer": "The agent uses a wildcard in the remote name rather than listing remotes one by one or querying *:. It derives the remote from _index (for example by splitting on \":\") and groups by it. It reports the per-remote counts and uses the _clusters section to say how many clusters were searched and whether any were skipped, partial or failed. A remote with no matching index is reported as such, not silently dropped."
       },
-      "metadata": { "case_id": "ccs-explicit-remote-index", "category": "remote-cluster" }
+      "metadata": {
+        "case_id": "ccs-remote-name-wildcard",
+        "category": "remote-cluster"
+      }
     },
     {
       "input": {
@@ -28,7 +34,10 @@
       "output": {
         "reference_answer": "The agent sends one ES|QL _query request with include_ccs_metadata: true mixing local and remote patterns, bounded to 15 minutes. It reports counts per cluster (for example by grouping on _index or reading _clusters.details) and the status of each cluster from the _clusters metadata, explicitly calling out skipped, partial or failed clusters rather than summing them silently."
       },
-      "metadata": { "case_id": "ccs-mixed-local-remote-metadata", "category": "remote-cluster" }
+      "metadata": {
+        "case_id": "ccs-mixed-local-remote-metadata",
+        "category": "remote-cluster"
+      }
     },
     {
       "input": {
@@ -37,7 +46,10 @@
       "output": {
         "reference_answer": "The query fails because the remote nightshift_does_not_exist is not configured (for example a no_such_remote_cluster_exception or an equivalent error). The agent quotes the error, states that the remote does not exist, and does not claim the count is zero or silently query a different remote."
       },
-      "metadata": { "case_id": "ccs-unknown-remote-error", "category": "failure-pattern" }
+      "metadata": {
+        "case_id": "ccs-unknown-remote-error",
+        "category": "failure-pattern"
+      }
     },
     {
       "input": {
@@ -46,7 +58,10 @@
       "output": {
         "reference_answer": "The agent calls _resolve/cluster and _resolve/index with an explicitly named remote (no wildcard remote), reports connected/skip_unavailable/matching_indices from _resolve/cluster, and lists at most 10 data streams from _resolve/index. Errors are quoted rather than hidden."
       },
-      "metadata": { "case_id": "ccs-resolve-cluster", "category": "remote-cluster" }
+      "metadata": {
+        "case_id": "ccs-resolve-cluster",
+        "category": "remote-cluster"
+      }
     },
     {
       "input": {
@@ -55,7 +70,10 @@
       "output": {
         "reference_answer": "The agent fans out in one sandbox command (for example xargs -P or background jobs) with a short per-request timeout, prefixes each result with its remote name, and reports per-remote counts. Failed or timed-out remotes are reported as failures with their error text, never folded into a zero count. It does not loop sequentially over many remotes."
       },
-      "metadata": { "case_id": "ccs-parallel-fanout-partial-failure", "category": "remote-cluster" }
+      "metadata": {
+        "case_id": "ccs-parallel-fanout-partial-failure",
+        "category": "remote-cluster"
+      }
     },
     {
       "input": {
@@ -64,7 +82,10 @@
       "output": {
         "reference_answer": "The agent narrows to one concrete data stream, runs STATS count = COUNT(*) BY bucket = BUCKET(@timestamp, 5 minutes) with a one-hour @timestamp bound, sorts by bucket, and reports the buckets. It recognises that ES|QL omits empty buckets and says which intervals had no documents rather than claiming 12 rows were returned."
       },
-      "metadata": { "case_id": "esql-bucket-histogram", "category": "esoteric-query" }
+      "metadata": {
+        "case_id": "esql-bucket-histogram",
+        "category": "esoteric-query"
+      }
     },
     {
       "input": {
@@ -73,34 +94,46 @@
       "output": {
         "reference_answer": "The agent writes one STATS with COUNT(*) plus COUNT(*) WHERE TO_LOWER(log.level) == \"error\" and COUNT(*) WHERE message LIKE \"*timeout*\" (or an equivalent MATCH/MATCH_PHRASE), using * not % for LIKE wildcards and handling case sensitivity explicitly. It reports the three counts and the query. If log.level or message is missing, it reports that from the error or field caps rather than guessing."
       },
-      "metadata": { "case_id": "esql-conditional-count-like", "category": "esoteric-query" }
+      "metadata": {
+        "case_id": "esql-conditional-count-like",
+        "category": "esoteric-query"
+      }
     },
     {
       "input": {
-        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. On one specific logs data stream over the last hour, compare full-text search approaches in ES|QL: count documents matching MATCH(message, \"connection refused\"), MATCH_PHRASE(message, \"connection refused\") and message LIKE \"*connection refused*\". Report the three counts and explain briefly why they differ."
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. On one specific logs data stream over the last hour, first sample a few message values and pick a two-word phrase that actually occurs in them. Then compare full-text search approaches in ES|QL for that phrase: count documents matching MATCH(message, \"<phrase>\"), MATCH_PHRASE(message, \"<phrase>\") and message LIKE \"*<phrase>*\". Report the phrase, the three counts and explain briefly why they differ."
       },
       "output": {
-        "reference_answer": "The agent runs the three variants with a one-hour bound on a concrete data stream and reports the counts. It explains that MATCH is an analysed term query (any term, so typically the largest), MATCH_PHRASE requires the terms in order, and LIKE is a case-sensitive wildcard on the raw value (and may fail or behave differently on text vs keyword fields). Any unsupported-function or field-type error is quoted."
+        "reference_answer": "The agent picks a phrase from sampled data so at least one variant returns documents, runs the three variants with a one-hour bound on a concrete data stream and reports the counts. It explains that MATCH is analysed and matches any of the terms (typically the largest count), MATCH_PHRASE requires the terms adjacent and in order, and LIKE is a case-sensitive wildcard on the raw value. Any unsupported-function or field-type error is quoted."
       },
-      "metadata": { "case_id": "esql-fulltext-match-variants", "category": "esoteric-query" }
+      "metadata": {
+        "case_id": "esql-fulltext-match-variants",
+        "category": "esoteric-query"
+      }
     },
     {
       "input": {
-        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. Determine whether an ES|QL LOOKUP JOIN is possible on this cluster: find any index with index.mode set to lookup (check settings on a narrow pattern, not every index). If one exists, run a LOOKUP JOIN from one logs data stream over the last 15 minutes with LIMIT 5. If none exists, report that and do not attempt to create one."
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. The ingress-nginx controller logs in logging-aws-us-east-2:logs-ingress-nginx.log-default use the klog format, for example `W1021 21:02:58.766315       7 controller.go:1464] Error ...`. Over the last 15 minutes, extract the severity letter and the source file:line from message in ES|QL and count documents per source file. Check how many documents your pattern actually parsed; if DISSECT leaves the fields null, switch to GROK. Report the pattern that worked, the parse coverage (parsed vs total) and the top source files."
       },
       "output": {
-        "reference_answer": "The agent checks for a lookup-mode index with a bounded request and either runs a small LOOKUP JOIN that returns rows, or reports that no lookup index exists and that LOOKUP JOIN therefore cannot run. It does not attempt writes (index creation) with the read-only key and does not claim a join succeeded without showing its output."
+        "reference_answer": "The agent stays on the named data stream and measures parse coverage by counting documents where the extracted fields are not null against the total. If DISSECT parses nothing, it notices that and switches to GROK; tolerating whitespace runs (for example with a regex such as \\s+) is what makes klog parse. It reports the working pattern, coverage numbers consistent with its queries, and the top source files from the parsed rows. Partial coverage is acceptable when reported honestly. Reporting top files from a pattern that parsed nothing, or exceeding the command budget, is not acceptable."
       },
-      "metadata": { "case_id": "esql-lookup-join-precondition", "category": "esoteric-query" }
+      "metadata": {
+        "case_id": "esql-dissect-grok-coverage",
+        "category": "esoteric-query"
+      }
     },
     {
       "input": {
-        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. Using the Query DSL _search API (not ES|QL), list every distinct service.name in traces-* for the last hour with a composite aggregation of page size 10, following after_key until all pages are read (stop after 5 pages). Report how many distinct services you found, how many pages you read and whether pagination was complete."
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. Using the Query DSL _search API (not ES|QL), list every distinct service.name in traces-* for the last hour with a composite aggregation of page size 2, following after_key until all pages are read (stop after 10 pages). Report how many distinct services you found, how many pages you read and whether pagination was complete."
       },
       "output": {
-        "reference_answer": "The agent uses size: 0 with a composite aggregation on service.name, a one-hour @timestamp range filter, and follows after_key across requests (or in one scripted loop) until after_key is absent or the 5-page limit is reached. It reports the distinct count, pages read and whether results were truncated by the page limit. It does not use a terms aggregation with an arbitrary large size as a substitute."
+        "reference_answer": "The agent uses size: 0 with a composite aggregation on service.name, a one-hour @timestamp range filter, and follows after_key across requests (or in one scripted loop) until a page comes back with fewer buckets or no after_key, or the 10-page limit is reached. It reports the distinct count, pages read and whether results were truncated by the page limit. It does not substitute a terms aggregation with a large size."
       },
-      "metadata": { "case_id": "dsl-composite-agg-pagination", "category": "esoteric-query" }
+      "metadata": {
+        "case_id": "dsl-composite-agg-pagination",
+        "category": "esoteric-query"
+      }
     },
     {
       "input": {
@@ -109,7 +142,10 @@
       "output": {
         "reference_answer": "The agent obtains an exact count with _count, track_total_hits: true, or ES|QL COUNT(*), bounded to 24 hours on a narrow data stream. It notes that _search caps hits.total at 10,000 with relation gte by default, and that deep pagination needs a point in time with search_after because from + size cannot exceed index.max_result_window. It does not report a capped 10,000 as the true total."
       },
-      "metadata": { "case_id": "dsl-total-hits-deep-pagination", "category": "failure-pattern" }
+      "metadata": {
+        "case_id": "dsl-total-hits-deep-pagination",
+        "category": "failure-pattern"
+      }
     },
     {
       "input": {
@@ -118,25 +154,34 @@
       "output": {
         "reference_answer": "The agent finds the busiest service with a bounded count, discovers the duration field (for example transaction.duration.us for Elastic APM or span duration fields for OpenTelemetry data) via field caps or a LIMIT 0 schema query, and computes percentiles with ES|QL PERCENTILE or a DSL percentiles aggregation. It reports the unit correctly (microseconds vs nanoseconds) and does not mislabel units."
       },
-      "metadata": { "case_id": "percentiles-field-discovery-units", "category": "esoteric-query" }
+      "metadata": {
+        "case_id": "percentiles-field-discovery-units",
+        "category": "esoteric-query"
+      }
     },
     {
       "input": {
-        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. Using _field_caps on logs-* restricted to one remote or one narrow data stream pattern, find one field that has conflicting types across indices. Then run an ES|QL query over the last 15 minutes that reads that field without a type error (for example by converting it with TO_STRING). Report the field, its conflicting types and the working query. If no conflicts exist, say so."
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. Using _field_caps on logging-aws-us-east-2:logs-* (keep the response small, for example with fields=http.* or by filtering the output with jq), find one field that has conflicting types across the indices of that pattern. Then run an ES|QL query over the last 15 minutes on the same pattern that groups by that field without a type error (for example by converting it with TO_STRING). Report the field, its conflicting types and the working query. If no conflicts exist, say so."
       },
       "output": {
-        "reference_answer": "The agent calls _field_caps with a narrow index pattern and identifies a field with more than one type (or reports none). It shows that reading the field directly fails or returns unsupported, then fixes it with an explicit conversion function such as TO_STRING and reports the working query. It does not hide the type error."
+        "reference_answer": "The agent uses _field_caps on the named pattern and reports a field whose types differ across indices, with the types it saw (for example keyword and long). It then runs an ES|QL query that groups by a converted value of that field and returns rows without a type error. Showing the unconverted error first is optional. If it reports that no conflicts exist, that is only acceptable when it inspected the whole named pattern rather than a narrower subset."
       },
-      "metadata": { "case_id": "esql-conflicting-field-types", "category": "failure-pattern" }
+      "metadata": {
+        "case_id": "esql-conflicting-field-types",
+        "category": "failure-pattern"
+      }
     },
     {
       "input": {
-        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. On one specific logs or traces data stream over the last hour, find a multi-valued field (for example tags or a labels array). Using ES|QL, report MV_COUNT statistics for it and the top 5 individual values after MV_EXPAND. Report the field and the query."
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. On one specific logs or traces data stream over the last hour, find a multi-valued field (for example tags, host.ip or a labels array). Using ES|QL, report MV_COUNT statistics for it and the top 5 individual values after MV_EXPAND. Report the field and the query."
       },
       "output": {
-        "reference_answer": "The agent identifies a multi-valued field, uses MV_COUNT to show that documents carry several values, and uses MV_EXPAND before STATS ... BY to count individual values, with a time bound and LIMIT. It explains that grouping without MV_EXPAND groups on each value implicitly or the whole set depending on the command, and does not double-count without noting it."
+        "reference_answer": "The agent identifies a multi-valued field, uses MV_COUNT to show that documents carry several values, and uses MV_EXPAND before STATS ... BY to count individual values, with a time bound and a LIMIT. It notes that expanded counts are per value, so their sum exceeds the document count. Trying a field that turns out to be single-valued or empty and moving on is fine."
       },
-      "metadata": { "case_id": "esql-multivalue-expand", "category": "esoteric-query" }
+      "metadata": {
+        "case_id": "esql-multivalue-expand",
+        "category": "esoteric-query"
+      }
     },
     {
       "input": {
@@ -145,7 +190,10 @@
       "output": {
         "reference_answer": "The agent makes the calls with the connector, reports each one's outcome, and for any 403 quotes the security_exception and names the missing privilege (for example monitor or manage_ilm). It does not treat a forbidden response as an empty result, does not try to work around the restriction, and does not print credentials."
       },
-      "metadata": { "case_id": "authz-forbidden-call-handling", "category": "failure-pattern" }
+      "metadata": {
+        "case_id": "authz-forbidden-call-handling",
+        "category": "failure-pattern"
+      }
     },
     {
       "input": {
@@ -154,7 +202,10 @@
       "output": {
         "reference_answer": "The query fails with a verification_exception for an unknown column service.nightshift_missing_field. The agent quotes the error and states the field does not exist in that data stream. It does not describe the outcome as no data and does not pipe the error into jq so that it disappears."
       },
-      "metadata": { "case_id": "esql-unknown-column-not-empty", "category": "failure-pattern" }
+      "metadata": {
+        "case_id": "esql-unknown-column-not-empty",
+        "category": "failure-pattern"
+      }
     },
     {
       "input": {
@@ -163,25 +214,94 @@
       "output": {
         "reference_answer": "The agent converts the New York window to UTC correctly for yesterday's date (UTC-4 during daylight saving time, UTC-5 otherwise), states the UTC bounds and DST status, and runs a bounded count with those bounds. It does not query 09:00-10:00 UTC or ignore the time zone."
       },
-      "metadata": { "case_id": "timezone-window-conversion", "category": "failure-pattern" }
+      "metadata": {
+        "case_id": "timezone-window-conversion",
+        "category": "failure-pattern"
+      }
     },
     {
       "input": {
-        "question": "Connector capability probe, not an incident. Budget: at most 3 Elasticsearch commands, no decision trees, no source code. Report the 10 largest logs data streams by document count on the local cluster (or on one named remote if the local cluster has none). Keep the response compact: use a text or filtered format and return only the top 10, not the full listing. Report name, document count and store size."
+        "question": "Connector capability probe, not an incident. Budget: at most 3 Elasticsearch commands, no decision trees, no source code. Report the 10 largest logs data streams by document count on the local cluster (or on one named remote if the local cluster has none). Keep the response compact: use a text or filtered format and return only the top 10, not the full listing. Report name and document count, plus store size if the API key is allowed to read it."
       },
       "output": {
-        "reference_answer": "The agent uses a compact listing such as _cat/indices or _data_stream/_stats with format=txt or column/sort/limit selection (or jq after checking for errors), returns only the top 10 rows, and reports name, document count and size. It does not dump the full index listing into the conversation."
+        "reference_answer": "The agent uses a compact request (for example _cat/indices or _data_stream with format=txt or filter_path, or an ES|QL STATS COUNT(*) BY data stream with SORT and LIMIT 10) and returns at most 10 rows with names and document counts. If size or stats APIs are forbidden for the read-only key, it quotes the security_exception, falls back to counting documents, and says sizes are unavailable. It does not dump the full index listing into the conversation."
       },
-      "metadata": { "case_id": "compact-large-listing", "category": "failure-pattern" }
+      "metadata": {
+        "case_id": "compact-large-listing",
+        "category": "failure-pattern"
+      }
     },
     {
       "input": {
-        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. Count documents over the last 24 hours across all of logs-* on the local cluster. If the query is slow or times out, do not retry the same broad query: narrow it by filtering on data_stream.dataset first or split the window, then report the count you could compute, what you narrowed, and whether the original query timed out."
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. In one logs data stream over the last 15 minutes, find a high-cardinality identifier field (for example a request, trace or span id; check with _field_caps). Report exactly how many distinct values it has. Note that an ES|QL STATS ... BY without LIMIT returns at most 1000 rows with only a Warning header; do not report the number of returned rows as the number of distinct values."
       },
       "output": {
-        "reference_answer": "The agent bounds the request with a @timestamp range and curl --max-time. If the broad query succeeds it reports the count. If it times out, it reports the timeout honestly, then narrows by data_stream.dataset or splits the window, and reports a clearly labelled partial or reconstructed count. It never presents a timed-out or partial result as complete."
+        "reference_answer": "The agent computes the distinct count with COUNT_DISTINCT (noting it is approximate at high cardinality) or by counting groups in a second STATS, rather than counting the rows of a grouped query. If it runs a grouped query, it recognises the 1000-row default limit (or the Warning header) and does not present 1000 as the answer."
       },
-      "metadata": { "case_id": "broad-pattern-timeout-recovery", "category": "failure-pattern" }
+      "metadata": {
+        "case_id": "esql-default-limit-truncation",
+        "category": "failure-pattern"
+      }
+    },
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. Use the data stream logging-aws-us-east-2:logs-generic.otel-default. Over the last 15 minutes, compute in ES|QL the percentage of documents with http.response.status_code of 400 or above, out of documents that have a status code. Check the field type first: if it is keyword, a numeric comparison fails and must be converted. Make sure the percentage is not truncated by integer division. Report the field type, the query, the counts and the percentage."
+      },
+      "output": {
+        "reference_answer": "The agent checks the field type (for example with _field_caps), converts a keyword status code with TO_INTEGER (or compares in the matching type) and computes the ratio with a floating-point conversion such as TO_DOUBLE before dividing. It reports counts and a percentage consistent with them. A result of 0 from integer division, or a status comparison that silently treats codes as strings, is not acceptable unless the agent identifies and corrects it. Type errors are quoted."
+      },
+      "metadata": {
+        "case_id": "esql-keyword-status-ratio",
+        "category": "failure-pattern"
+      }
+    },
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. Use the data stream logging-aws-us-east-2:logs-generic.otel-default. Over the last 15 minutes, count in a single ES|QL STATS command: all documents, documents with http.response.status_code 200, documents where the status is not 200, and documents where the status is null. Report the four numbers and explain whether the 200 and not-200 counts add up to the total."
+      },
+      "output": {
+        "reference_answer": "The agent runs one STATS with four conditional counts and reports four numbers consistent with each other. It handles the field type: if the status code is keyword it compares against the string \"200\" or converts with TO_INTEGER, quoting any type error it hit first. It explains that != excludes null values, so the 200 and not-200 counts add up to the total minus the null count, and confirms that from its own numbers. Claiming the counts add up to the total when nulls are present is not acceptable."
+      },
+      "metadata": {
+        "case_id": "esql-null-not-equal-semantics",
+        "category": "failure-pattern"
+      }
+    },
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 4 Elasticsearch commands, no decision trees, no source code. Using _field_caps on one narrow logs data stream, find a field whose name contains a character that needs quoting in ES|QL, such as \"/\" or \"-\" (Kubernetes label fields often do). Group the last hour of documents by that field and report the top 5 values. Report the field name and the exact query."
+      },
+      "output": {
+        "reference_answer": "The agent discovers such a field from _field_caps and quotes it with backticks in ES|QL. If an unquoted attempt fails (for example \"/\" parsed as division, reported as unknown columns), it quotes the error and fixes the query rather than giving up or choosing a different field without explanation. It reports the top values with a time bound and LIMIT."
+      },
+      "metadata": {
+        "case_id": "esql-backtick-field-names",
+        "category": "failure-pattern"
+      }
+    },
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 3 Elasticsearch commands, no decision trees, no source code. On one specific logs data stream over the last hour, use the ES|QL CATEGORIZE function to find the 3 most common message patterns. For each, report its document count and one example message (truncated to about 100 characters)."
+      },
+      "output": {
+        "reference_answer": "The agent runs STATS COUNT(*) BY CATEGORIZE(message) with a time bound, SORT and LIMIT, and returns one example per pattern (for example with VALUES or a follow-up bounded query). It reports counts and examples without dumping full patterns or messages. An unsupported-function error, if any, is quoted."
+      },
+      "metadata": {
+        "case_id": "esql-categorize-patterns",
+        "category": "esoteric-query"
+      }
+    },
+    {
+      "input": {
+        "question": "Connector capability probe, not an incident. Budget: at most 3 Elasticsearch commands, no decision trees, no source code. Use the data stream logging-aws-us-east-2:logs-generic.otel-default. Over the last 15 minutes, report each value of http.response.status_code (including null) with its document count and its share of the total, in a single ES|QL query using INLINE STATS. If INLINE STATS is unsupported, quote the error and compute the share another way."
+      },
+      "output": {
+        "reference_answer": "The agent groups by the field, adds the total with INLINE STATS (or quotes the error and uses a correct fallback), and computes the share with floating-point division so it is not truncated to 0. The shares are consistent with the counts and sum to about 100%."
+      },
+      "metadata": {
+        "case_id": "esql-inline-stats-share",
+        "category": "esoteric-query"
+      }
     }
   ]
 }

@@ -341,11 +341,14 @@ NIGHTSHIFT_DATASETS=connector-probe \
   --model eis-anthropic-claude-5-5-sonnet --judge eis-anthropic-claude-4-6-sonnet
 ```
 
-The bundled [`es_connector_quick.json`](evals/connector_probe/es_connector_quick.json) holds 20
-probes covering cross-cluster search, less common ES|QL and Query DSL features, and failure patterns
-such as unknown remotes, unknown columns, capped totals and forbidden calls. Point
-`NIGHTSHIFT_PROBE_EXAMPLES_FILE` at another file in the [same format](#trace-only-investigations)
-to run a subset; give it its own `dataset` name so it does not replace the stored 20-case dataset.
+The bundled [`es_connector_quick.json`](evals/connector_probe/es_connector_quick.json) holds 25
+probes covering cross-cluster search (including async and partial results), less common ES|QL and
+Query DSL features, and failure patterns such as unknown remotes, unknown columns, the default
+1000-row limit, keyword-typed numbers, integer division, null comparisons, field names that need
+backticks and forbidden calls. Every probe uses a relative time window and grades behaviour, not
+counts, so references stay valid week to week. Point `NIGHTSHIFT_PROBE_EXAMPLES_FILE` at another
+file in the [same format](#trace-only-investigations) to run a subset; give it its own `dataset`
+name so it does not replace the stored 25-case dataset.
 
 | Evaluator             | Kind | Scores                                                                       |
 | --------------------- | ---- | ---------------------------------------------------------------------------- |
