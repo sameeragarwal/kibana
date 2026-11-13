@@ -40,16 +40,30 @@ export const pickVoice = (
   return undefined;
 };
 
+// Chrome cuts off a single utterance after about 15 seconds, so the browser speaks per sentence.
+const splitSentences = (text: string): string[] =>
+  text
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+
 /** Speaks with the browser's own voices. */
 export const createBrowserSpeechPlayer = (): SpeechPlayer => ({
   speak: (text, onEnd) => {
     const { lang } = document.documentElement;
     const voice = pickVoice(window.speechSynthesis.getVoices(), lang);
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = voice?.lang ?? lang;
-    if (voice) utterance.voice = voice;
-    if (onEnd) utterance.onend = onEnd;
-    window.speechSynthesis.speak(utterance);
+    const sentences = splitSentences(text);
+    if (sentences.length === 0) {
+      onEnd?.();
+      return;
+    }
+    sentences.forEach((sentence, index) => {
+      const utterance = new SpeechSynthesisUtterance(sentence);
+      utterance.lang = voice?.lang ?? lang;
+      if (voice) utterance.voice = voice;
+      if (onEnd && index === sentences.length - 1) utterance.onend = onEnd;
+      window.speechSynthesis.speak(utterance);
+    });
   },
   isSpeaking: () => Boolean(window.speechSynthesis?.speaking || window.speechSynthesis?.pending),
   cancel: () => window.speechSynthesis?.cancel(),
@@ -94,8 +108,9 @@ interface ProviderSpeechPlayerOptions {
 }
 
 /**
- * Speaks with a voice provider. Every queued sentence is fetched as soon as it is queued so the
- * next one is ready when the current one ends; a sentence that fails is spoken by the fallback.
+ * Speaks with a voice provider. Each text is synthesized whole, so it keeps one natural flow, and
+ * fetched as soon as it is queued so it is ready when the one before ends; text that fails is
+ * spoken by the fallback.
  */
 export class ProviderSpeechPlayer implements SpeechPlayer {
   private queue: QueuedSpeech[] = [];

@@ -138,7 +138,7 @@ const transcribeWithOpenAi = async (
 };
 
 const SPEECH_INSTRUCTIONS =
-  'Speak like a calm, friendly site reliability engineer briefing a colleague: natural, conversational and unhurried.';
+  'You are on a relaxed phone call with a teammate. Talk the way people actually talk, not like reading aloud: warm, easygoing, with natural rhythm, small pauses and varied intonation. Sound genuinely engaged, a little upbeat for good news and calmly concerned for problems.';
 
 export function registerInternalVoiceRoutes({ router, logger, config }: RouteDependencies) {
   const wrapHandler = getHandlerWrapper({ logger });

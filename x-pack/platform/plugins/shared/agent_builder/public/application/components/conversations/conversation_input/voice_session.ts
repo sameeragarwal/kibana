@@ -79,13 +79,6 @@ const getErrorReason = (error: unknown): string | undefined => {
   return body?.message ?? message;
 };
 
-// Chrome cuts off a single utterance after about 15 seconds, so replies are spoken per sentence.
-const splitSentences = (text: string): string[] =>
-  text
-    .split(/(?<=[.!?])\s+/)
-    .map((sentence) => sentence.trim())
-    .filter(Boolean);
-
 // Gives a remounting input (a new conversation swaps the empty screen for the timeline) time to
 // bind again before an unbound session is treated as abandoned.
 const UNBOUND_GRACE_MS = 1000;
@@ -269,11 +262,11 @@ export class VoiceSession {
           if (!signal.aborted) this.stop();
           return;
         }
-        cue = (await this.respond(event, signal)) || cue;
+        await this.respond(event, signal);
         continue;
       }
 
-      // The listening cue only follows the voice, so an interrupted listen resumes quietly.
+      // The cue only opens the call; after that the voice finishing is the user's turn to talk.
       const heard = await this.listen(signal, cue);
       cue = false;
       if (signal.aborted) return;
@@ -427,10 +420,9 @@ export class VoiceSession {
     if (!this.binding?.send(request)) this.setTask(undefined);
   }
 
-  /** Speaks text sentence by sentence, resolving once it has been heard or the call ends. */
+  /** Speaks text, resolving once it has been heard or the call ends. */
   private speak(text: string, signal: AbortSignal): Promise<void> {
-    const sentences = splitSentences(text);
-    if (sentences.length === 0 || signal.aborted) return Promise.resolve();
+    if (!text.trim() || signal.aborted) return Promise.resolve();
     this.setPhase('speaking');
     return new Promise((resolve) => {
       const done = () => {
@@ -439,9 +431,7 @@ export class VoiceSession {
         resolve();
       };
       signal.addEventListener('abort', done);
-      sentences.forEach((sentence, index) =>
-        this.player.speak(sentence, index === sentences.length - 1 ? done : undefined)
-      );
+      this.player.speak(text, done);
     });
   }
 
