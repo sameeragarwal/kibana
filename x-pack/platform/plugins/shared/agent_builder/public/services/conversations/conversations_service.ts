@@ -23,6 +23,13 @@ import type {
 } from '../../../common/http_api/conversations';
 import type { ReadWorkspaceFileResponse } from '../../../common/http_api/workspace_files';
 import type {
+  NarrateRequestBody,
+  NarrateResponse,
+  SpeakTextRequestBody,
+  TranscribeAudioRequestBody,
+  TranscribeAudioResponse,
+} from '../../../common/http_api/voice';
+import type {
   ConversationListOptions,
   ConversationSearchRequestOptions,
   ConversationGetOptions,
@@ -193,5 +200,46 @@ export class ConversationsService {
       buildPath(`${internalApiPath}/conversations/{conversationId}/files`, { conversationId }),
       { query: { path } }
     );
+  }
+
+  /** Turns a recorded WAV clip into text with a speech-capable Elastic Inference Service model. */
+  async transcribeAudio({
+    audio,
+    signal,
+  }: TranscribeAudioRequestBody & { signal?: AbortSignal }): Promise<TranscribeAudioResponse> {
+    return await this.http.post<TranscribeAudioResponse>(
+      buildPath(`${internalApiPath}/voice/_transcribe`),
+      { body: JSON.stringify({ audio }), signal }
+    );
+  }
+
+  /** Asks the voice what to say about the agent's work so far. */
+  async narrate({
+    signal,
+    ...body
+  }: NarrateRequestBody & { signal?: AbortSignal }): Promise<NarrateResponse> {
+    return await this.http.post<NarrateResponse>(buildPath(`${internalApiPath}/voice/_narrate`), {
+      body: JSON.stringify(body),
+      signal,
+    });
+  }
+
+  /** Speaks text with the configured voice provider; resolves without audio when there is none. */
+  async synthesizeSpeech({
+    text,
+    signal,
+  }: SpeakTextRequestBody & { signal?: AbortSignal }): Promise<Blob | undefined> {
+    try {
+      const { response } = await this.http.post(buildPath(`${internalApiPath}/voice/_speak`), {
+        body: JSON.stringify({ text }),
+        signal,
+        asResponse: true,
+        rawResponse: true,
+      });
+      return await response?.blob();
+    } catch (error) {
+      if (error?.response?.status === 404) return undefined;
+      throw error;
+    }
   }
 }

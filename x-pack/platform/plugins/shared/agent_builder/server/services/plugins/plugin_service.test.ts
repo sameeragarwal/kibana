@@ -165,6 +165,7 @@ describe('PluginsService', () => {
           scheduledDelay: 1000,
           opik_distributed_tracing: false,
         },
+        voice: { useEis: true },
       },
       analyticsService: mockAnalyticsService as unknown as AnalyticsService,
       trackingService: mockTrackingService as unknown as TrackingService,
@@ -566,6 +567,7 @@ describe('PluginsService', () => {
                 scheduledDelay: 1000,
                 opik_distributed_tracing: false,
               },
+              voice: { useEis: true },
             },
             analyticsService: mockAnalyticsService as unknown as AnalyticsService,
           });

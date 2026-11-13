@@ -12,6 +12,7 @@ import React from 'react';
 import { ConversationActionButton } from './conversation_action_button';
 import { ConnectorSelector } from './connector_selector';
 import { TriggerModeSelector } from './trigger_mode_selector';
+import { VoiceConversationButton } from './voice_conversation_button';
 import { ChatTriggerMode } from '../../../../../../common/http_api/chat';
 
 const mentionButtonLabel = i18n.translate(
@@ -34,6 +35,7 @@ interface InputActionsProps {
   onTriggerModeChange: (mode: ChatTriggerMode) => void;
   onMentionClick?: () => void;
   isMentionDisabled?: boolean;
+  voiceConversation?: React.ComponentProps<typeof VoiceConversationButton>;
 }
 
 export const InputActions: React.FC<InputActionsProps> = ({
@@ -45,6 +47,7 @@ export const InputActions: React.FC<InputActionsProps> = ({
   onTriggerModeChange,
   onMentionClick,
   isMentionDisabled = false,
+  voiceConversation,
 }) => {
   const showConnectorSelector = triggerMode !== ChatTriggerMode.Never;
   const showStartActions = showConnectorSelector || Boolean(onMentionClick);
@@ -93,6 +96,11 @@ export const InputActions: React.FC<InputActionsProps> = ({
                   triggerMode={triggerMode}
                   onTriggerModeChange={onTriggerModeChange}
                 />
+              </EuiFlexItem>
+            )}
+            {voiceConversation && (
+              <EuiFlexItem grow={false}>
+                <VoiceConversationButton {...voiceConversation} />
               </EuiFlexItem>
             )}
             <EuiFlexItem grow={false}>

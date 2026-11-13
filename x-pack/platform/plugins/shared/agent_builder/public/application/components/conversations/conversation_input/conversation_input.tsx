@@ -25,9 +25,11 @@ import {
   formatAgentBuilderErrorMessage,
 } from '@kbn/agent-builder-browser';
 import { KbnInfoCallout } from '@kbn/ui-callout';
+import type { NarrateRequestBody } from '../../../../../common/http_api/voice';
 import { useConversationId } from '../../../context/conversation/use_conversation_id';
 import { useConversationStream } from '../../../hooks/use_conversation_stream';
 import { useCurrentUser } from '../../../hooks/use_current_user';
+import { useAgentBuilderServices } from '../../../hooks/use_agent_builder_service';
 import { useUiPrivileges } from '../../../hooks/use_ui_privileges';
 import { labels } from '../../../utils/i18n';
 import { useInputDraft } from '../../../hooks/use_input_draft';
@@ -41,6 +43,7 @@ import { useValidateAgentId } from '../../../hooks/agents/use_validate_agent_id'
 import { useAgentModel } from '../../../hooks/agents/use_agent_model';
 import {
   useAgentId,
+  useConversation,
   useConversationReadOnly,
   useConversationTitle,
   useHasActiveConversation,
@@ -55,6 +58,9 @@ import { InputActions } from './input_actions';
 import { useConversationContext } from '../../../context/conversation/conversation_context';
 import { AttachmentPillsRow } from './attachment_pills_row';
 import { useImageUpload } from './use_image_upload';
+import { useVoiceConversation } from './use_voice_conversation';
+import type { VoiceError } from './voice_session';
+import { getVoiceErrorMessage } from './voice_session';
 
 const containerAriaLabel = i18n.translate('xpack.agentBuilder.conversationInput.container.label', {
   defaultMessage: 'Message input form',
@@ -62,6 +68,10 @@ const containerAriaLabel = i18n.translate('xpack.agentBuilder.conversationInput.
 
 const postToTeamLabel = i18n.translate('xpack.agentBuilder.conversationInput.postToTeam.label', {
   defaultMessage: "Agent won't respond to this message.",
+});
+
+const noVoiceReplyLabel = i18n.translate('xpack.agentBuilder.conversationInput.voice.noReply', {
+  defaultMessage: "The agent didn't reply, so the voice conversation ended.",
 });
 
 const getMessageTooLongLabel = (characterCount: number): string =>
@@ -320,6 +330,8 @@ const ConversationInputComponent: React.FC<ConversationInputProps> = ({
     autoSendInitialMessage,
     resetInitialMessage,
   } = useConversationContext();
+  const { agentService, conversationsService } = useAgentBuilderServices();
+  const { conversation } = useConversation();
   const { submitMessage, isCreatingConversation } = useSubmitMessage();
   const { mutateAsync: sendUserMessage, isLoading: isSendingUserMessage } = useSendUserMessage();
 
@@ -352,9 +364,7 @@ const ConversationInputComponent: React.FC<ConversationInputProps> = ({
     isCreatingConversation ||
     isSendingUserMessage;
   const isMessageTooLong = overLimitCharacterCount > 0;
-  const isSubmitDisabled =
-    messageEditorController.isEmpty ||
-    isMessageTooLong ||
+  const isSubmitBlocked =
     isResponseLoading ||
     isSendingUserMessage ||
     isCreatingConversation ||
@@ -363,6 +373,7 @@ const ConversationInputComponent: React.FC<ConversationInputProps> = ({
     isAgentModelLoading ||
     isAwaitingPrompt ||
     uploadingNames.size > 0;
+  const isSubmitDisabled = messageEditorController.isEmpty || isMessageTooLong || isSubmitBlocked;
 
   const placeholder = isAgentDeleted
     ? disabledPlaceholder(agentId)
@@ -472,6 +483,57 @@ const ConversationInputComponent: React.FC<ConversationInputProps> = ({
     [messageEditorController]
   );
 
+  // Spoken messages skip the editor, so anything typed there stays as a draft.
+  const sendSpokenMessage = (message: string): boolean => {
+    if (isSubmitBlocked) return false;
+    if (onSubmitOverride) {
+      onSubmitOverride(message);
+    } else {
+      submitMessage(message);
+    }
+    onSubmit?.();
+    return true;
+  };
+
+  const transcribeSpeech = useCallback(
+    async (audio: string, signal: AbortSignal) =>
+      (await conversationsService.transcribeAudio({ audio, signal })).transcript,
+    [conversationsService]
+  );
+  const synthesizeSpeech = useCallback(
+    (text: string, signal: AbortSignal) => conversationsService.synthesizeSpeech({ text, signal }),
+    [conversationsService]
+  );
+  const narrateVoice = useCallback(
+    async (request: NarrateRequestBody, signal: AbortSignal) =>
+      (await conversationsService.narrate({ ...request, signal })).text,
+    [conversationsService]
+  );
+  const handleVoiceError = useCallback(
+    (error: VoiceError) => addErrorToast({ title: getVoiceErrorMessage(error) }),
+    [addErrorToast]
+  );
+  const handleNoVoiceReply = useCallback(
+    () => addErrorToast({ title: noVoiceReplyLabel }),
+    [addErrorToast]
+  );
+  const voice = useVoiceConversation({
+    enabled:
+      Boolean(agentId && agentService.getUIDefinition(agentId)?.voiceInput) &&
+      !isAgentDeleted &&
+      !isBoundAgentForbidden &&
+      triggerMode !== ChatTriggerMode.Never,
+    conversationId,
+    rounds: conversation?.rounds,
+    isResponseLoading,
+    transcribe: transcribeSpeech,
+    synthesize: synthesizeSpeech,
+    narrate: narrateVoice,
+    send: sendSpokenMessage,
+    onError: handleVoiceError,
+    onNoReply: handleNoVoiceReply,
+  });
+
   const handleSubmit = () => {
     if (isSubmitDisabled) {
       return;
@@ -494,6 +556,7 @@ const ConversationInputComponent: React.FC<ConversationInputProps> = ({
       clearTimeout(saveDraftDebounceRef.current);
       saveDraftDebounceRef.current = null;
     }
+    voice.stop();
 
     if (triggerMode === ChatTriggerMode.Never) {
       sendUserMessage(content)
@@ -585,6 +648,9 @@ const ConversationInputComponent: React.FC<ConversationInputProps> = ({
           onTriggerModeChange={setTriggerMode}
           onMentionClick={canMention ? handleMentionClick : undefined}
           isMentionDisabled={isInputDisabled}
+          voiceConversation={
+            voice.isAvailable ? { phase: voice.phase, onToggle: voice.toggle } : undefined
+          }
         />
       )}
     </InputContainer>

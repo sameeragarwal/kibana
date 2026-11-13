@@ -6,6 +6,7 @@
  */
 
 import type { AppUpdater, ChromeStart, PluginInitializerContext } from '@kbn/core/public';
+import { NIGHTSHIFT_ASSISTANT_AGENT_ID } from '@kbn/nightshift-investigations-plugin/common';
 import { catchError, from, map, of, Subscription, tap, type BehaviorSubject } from 'rxjs';
 import type { FocusedSignificantEventService } from './chat/focused_significant_event_service';
 import type { NightshiftStartDependencies } from './types';
@@ -62,6 +63,8 @@ export const startNightshiftServices = ({
 
   const { agentBuilder } = pluginsStart;
   if (agentBuilder) {
+    agentBuilder.agents.registerUIDefinition(NIGHTSHIFT_ASSISTANT_AGENT_ID, { voiceInput: true });
+
     const logger = context.logger.get('nightshiftAgentBuilderAttachments');
     void import('./chat/agent_builder/significant_event_attachments')
       .then(({ registerNightshiftAgentBuilderAttachments }) => {

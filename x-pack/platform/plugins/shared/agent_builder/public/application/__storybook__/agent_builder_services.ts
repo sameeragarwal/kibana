@@ -191,6 +191,7 @@ const defaultServices: AgentBuilderInternalService = {
     create: () => Promise.resolve({} as never),
     update: () => Promise.resolve({} as never),
     delete: () => Promise.resolve({} as never),
+    getUIDefinition: () => undefined,
   } as never,
   attachmentsService: storybookAttachmentsService,
   conversationEventsService: storybookConversationEventsService,

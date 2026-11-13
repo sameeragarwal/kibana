@@ -35,6 +35,9 @@ import { useAgentBuilderServices } from '../../../hooks/use_agent_builder_servic
 import { ChatTriggerMode } from '../../../../../common/http_api/chat';
 import { useInputDraft } from '../../../hooks/use_input_draft';
 
+jest.mock('../../../hooks/use_live_events', () => ({
+  useLiveEvents: () => [],
+}));
 jest.mock('../../../hooks/use_conversation_stream', () => ({
   useConversationStream: jest.fn(),
 }));
@@ -55,6 +58,7 @@ jest.mock('../../../hooks/agents/use_agent_by_id', () => ({
 }));
 jest.mock('../../../hooks/use_conversation', () => ({
   useAgentId: jest.fn(),
+  useConversation: jest.fn().mockReturnValue({ conversation: undefined }),
   useConversationReadOnly: jest.fn(),
   useConversationTitle: jest.fn(),
   useHasActiveConversation: jest.fn(),
@@ -104,15 +108,24 @@ jest.mock('./input_actions', () => ({
     triggerMode,
     onTriggerModeChange,
     onMentionClick,
+    voiceConversation,
   }: {
     showTriggerModeSelector: boolean;
     triggerMode: string;
     onTriggerModeChange: (mode: string) => void;
     onMentionClick?: () => void;
+    voiceConversation?: { onToggle: () => void };
   }) => (
     <>
       {onMentionClick && (
         <button type="button" data-test-subj="mock-mention-button" onClick={onMentionClick} />
+      )}
+      {voiceConversation && (
+        <button
+          type="button"
+          data-test-subj="mock-voice-button"
+          onClick={voiceConversation.onToggle}
+        />
       )}
       {showTriggerModeSelector && (
         <select
@@ -265,6 +278,10 @@ describe('ConversationInput', () => {
         create: jest.fn().mockResolvedValue({ file: { id: 'test-file-id' } }),
         upload: jest.fn().mockResolvedValue(undefined),
       },
+      agentService: {
+        getUIDefinition: (agentId: string) =>
+          agentId === 'voice-agent' ? { voiceInput: true } : undefined,
+      },
     } as never);
     mockedUseSubmitMessage.mockReturnValue({ submitMessage, isCreatingConversation: false });
     sendUserMessage.mockResolvedValue({ id: 'conv-1' });
@@ -358,6 +375,36 @@ describe('ConversationInput', () => {
       expect(screen.queryByTestId('agentBoundForbiddenCallout')).not.toBeInTheDocument();
       fireEvent.click(screen.getByTestId('mock-message-editor-submit'));
       expect(submitMessage).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('voice conversation', () => {
+    const voiceWindow = window as unknown as Record<string, unknown>;
+
+    beforeEach(() => {
+      Object.defineProperty(navigator, 'mediaDevices', {
+        value: { getUserMedia: jest.fn() },
+        configurable: true,
+      });
+      voiceWindow.MediaRecorder = jest.fn();
+      voiceWindow.speechSynthesis = { cancel: jest.fn(), speak: jest.fn() };
+    });
+
+    afterEach(() => {
+      Reflect.deleteProperty(navigator, 'mediaDevices');
+      delete voiceWindow.MediaRecorder;
+      delete voiceWindow.speechSynthesis;
+    });
+
+    it.each([
+      ['an agent registered with voice input', 'voice-agent', true],
+      ['any other agent', 'elastic-ai-agent', false],
+    ])('is offered only to opted-in agents: %s', (_, agentId, isShown) => {
+      mockedUseAgentId.mockReturnValue(agentId);
+
+      renderInput(<ConversationInput />);
+
+      expect(Boolean(screen.queryByTestId('mock-voice-button'))).toBe(isShown);
     });
   });
 

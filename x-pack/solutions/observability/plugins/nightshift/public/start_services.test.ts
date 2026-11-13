@@ -25,7 +25,7 @@ describe('startNightshiftServices', () => {
     const onAvailabilityChange = jest.fn();
     const subscription = startNightshiftServices({
       pluginsStart: {
-        agentBuilder: {},
+        agentBuilder: { agents: { registerUIDefinition: jest.fn() } },
         share: {},
         significantEvents: {
           significantEventsRepositoryClient: {

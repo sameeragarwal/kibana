@@ -16,6 +16,7 @@ import type { InternalStartServices } from '../services';
 import type { AgentBuilderRouter } from '../request_handler_context';
 import type { TrackingService } from '../telemetry/tracking_service';
 import type { AnalyticsService } from '../telemetry';
+import type { AgentBuilderConfig } from '../config';
 
 export interface RouteDependencies {
   router: AgentBuilderRouter;
@@ -25,4 +26,5 @@ export interface RouteDependencies {
   pluginsSetup: AgentBuilderSetupDependencies;
   trackingService?: TrackingService;
   analyticsService?: AnalyticsService;
+  config?: AgentBuilderConfig;
 }

@@ -7,6 +7,7 @@
 
 import { buildPath, type HttpSetup } from '@kbn/core-http-browser';
 import type { AgentAccessControl } from '@kbn/agent-builder-common';
+import type { AgentUIDefinition } from '@kbn/agent-builder-browser';
 import type {
   AgentAccessControlUpdateRequest,
   AgentCreateRequest,
@@ -36,9 +37,21 @@ const AGENT_MODEL_BY_ID_PATH = `${internalApiPath}/agents/{id}/_model`;
 
 export class AgentService {
   private readonly http: HttpSetup;
+  private readonly uiDefinitions: Map<string, AgentUIDefinition> = new Map();
 
   constructor({ http }: { http: HttpSetup }) {
     this.http = http;
+  }
+
+  registerUIDefinition(agentId: string, definition: AgentUIDefinition): void {
+    if (this.uiDefinitions.has(agentId)) {
+      throw new Error(`Agent "${agentId}" already has a UI definition.`);
+    }
+    this.uiDefinitions.set(agentId, definition);
+  }
+
+  getUIDefinition(agentId: string): AgentUIDefinition | undefined {
+    return this.uiDefinitions.get(agentId);
   }
 
   /**

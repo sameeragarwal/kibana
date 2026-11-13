@@ -44,6 +44,7 @@ describe('ToolsService', () => {
             scheduledDelay: 1000,
             opik_distributed_tracing: false,
           },
+          voice: { useEis: true },
         },
       });
 
@@ -64,6 +65,7 @@ describe('ToolsService', () => {
             scheduledDelay: 1000,
             opik_distributed_tracing: false,
           },
+          voice: { useEis: true },
         },
       });
 

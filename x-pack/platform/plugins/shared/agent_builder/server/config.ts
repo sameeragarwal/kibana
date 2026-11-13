@@ -45,6 +45,28 @@ export const configSchema = schema.object({
       register: schema.boolean({ defaultValue: false }),
     })
   ),
+  /**
+   * Voice conversations either transcribe through the Elastic Inference Service and speak with the
+   * browser's voice (EIS has no speech output), or use OpenAI for both when `useEis` is false.
+   */
+  voice: schema.object(
+    {
+      useEis: schema.boolean({ defaultValue: true }),
+      openai: schema.maybe(
+        schema.object({
+          apiKey: schema.string({ minLength: 1 }),
+          transcriptionModel: schema.string({ defaultValue: 'gpt-transcribe' }),
+          conversationModel: schema.string({ defaultValue: 'gpt-5.4-mini' }),
+          speechModel: schema.string({ defaultValue: 'gpt-4o-mini-tts' }),
+          voice: schema.string({ defaultValue: 'marin' }),
+        })
+      ),
+    },
+    {
+      validate: ({ useEis, openai }) =>
+        useEis || openai ? undefined : 'voice.openai.apiKey is required when voice.useEis is false',
+    }
+  ),
 });
 
 export type AgentBuilderConfig = TypeOf<typeof configSchema>;

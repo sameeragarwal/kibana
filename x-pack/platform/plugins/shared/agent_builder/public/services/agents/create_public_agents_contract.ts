@@ -50,5 +50,11 @@ export const createPublicAgentsContract = ({
         configuration: { connector_ids: currentConnectorIds.filter((id) => id !== connectorId) },
       });
     },
+    registerUIDefinition: (agentId, definition) => {
+      agentService.registerUIDefinition(agentId, definition);
+    },
+    getUIDefinition: (agentId) => {
+      return agentService.getUIDefinition(agentId);
+    },
   };
 };

@@ -12,6 +12,20 @@ export type AgentWithPermissions = AgentDefinition & {
 };
 
 /**
+ * Browser-side UI options for an agent, registered by the plugin that owns it.
+ */
+export interface AgentUIDefinition {
+  /**
+   * Show a microphone button in the agent's chat input that dictates speech into the message
+   * with the browser's speech recognition. Some browsers (e.g. Chrome) send the audio to a cloud
+   * speech service. The button stays hidden when the browser has no speech recognition or the
+   * page's Permissions-Policy blocks the microphone, which Kibana does by default; operators
+   * allow it with `server.securityResponseHeaders.permissionsPolicy`.
+   */
+  voiceInput?: boolean;
+}
+
+/**
  * Public-faving contract for AgentBuilder's agents service.
  */
 export interface AgentsServiceStartContract {
@@ -45,4 +59,14 @@ export interface AgentsServiceStartContract {
     agentId: string;
     connectorId: string;
   }): Promise<AgentDefinition>;
+
+  /**
+   * Register UI options for an agent. Throws if the agent already has UI options.
+   */
+  registerUIDefinition(agentId: string, definition: AgentUIDefinition): void;
+
+  /**
+   * Resolve the UI options registered for an agent, if any.
+   */
+  getUIDefinition(agentId: string): AgentUIDefinition | undefined;
 }

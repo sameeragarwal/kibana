@@ -5,4 +5,8 @@
  * 2.0.
  */
 
-export type { AgentsServiceStartContract, AgentWithPermissions } from './contract';
+export type {
+  AgentsServiceStartContract,
+  AgentUIDefinition,
+  AgentWithPermissions,
+} from './contract';

@@ -19,7 +19,7 @@ export type {
   ListWorkflowsResponse,
   WorkflowListItem,
 } from './tools';
-export type { AgentsServiceStartContract, AgentWithPermissions } from './agents';
+export type { AgentsServiceStartContract, AgentUIDefinition, AgentWithPermissions } from './agents';
 export type {
   AttachmentUIDefinition,
   AttachmentServiceStartContract,

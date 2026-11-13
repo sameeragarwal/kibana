@@ -52,6 +52,8 @@ const createAgentStartMock = (): AgentsServiceStartContractMock => {
     addSkillToAgent: jest.fn(),
     addConnectorToAgent: jest.fn(),
     removeConnectorFromAgent: jest.fn(),
+    registerUIDefinition: jest.fn(),
+    getUIDefinition: jest.fn(),
   };
 };
 
