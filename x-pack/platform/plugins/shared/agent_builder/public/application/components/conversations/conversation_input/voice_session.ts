@@ -6,7 +6,17 @@
  */
 
 import { i18n } from '@kbn/i18n';
-import type { NarrateRequestBody } from '../../../../../common/http_api/voice';
+import type {
+  VoiceConverseRequestBody,
+  VoiceConverseResponse,
+  VoiceTranscriptEntry,
+} from '../../../../../common/http_api/voice';
+import {
+  MAX_VOICE_ACTIVITY_ITEMS,
+  MAX_VOICE_ANSWER_LENGTH,
+  MAX_VOICE_TEXT_LENGTH,
+  MAX_VOICE_TRANSCRIPT_ENTRIES,
+} from '../../../../../common/http_api/voice';
 import type { Microphone } from './record_utterance';
 import { openMicrophone, recordUtterance, toTranscriptionAudio } from './record_utterance';
 import type { SynthesizeSpeech } from './speech_player';
@@ -29,12 +39,15 @@ export interface VoiceError {
 export interface VoiceSessionBinding {
   /** Turns a base64 WAV recording into text. */
   transcribe: (audio: string, signal: AbortSignal) => Promise<string>;
-  /** Sends what the user said to the agent, returning whether it could be sent. */
+  /** Hands a request to the agent, returning whether it could be sent. */
   send: (message: string) => boolean;
   /** Turns text into audio with the configured voice provider; the browser speaks otherwise. */
   synthesize?: SynthesizeSpeech;
-  /** Puts the agent's work into words worth saying; progress is read verbatim otherwise. */
-  narrate?: (request: NarrateRequestBody, signal: AbortSignal) => Promise<string>;
+  /** Asks the voice agent what to say; without one, requests go to the agent and replies are read. */
+  converse?: (
+    request: VoiceConverseRequestBody,
+    signal: AbortSignal
+  ) => Promise<VoiceConverseResponse>;
   onError: (error: VoiceError) => void;
 }
 
@@ -77,27 +90,32 @@ const splitSentences = (text: string): string[] =>
 // bind again before an unbound session is treated as abandoned.
 const UNBOUND_GRACE_MS = 1000;
 
-// While the agent works, the voice says something about its new activity once it has been quiet
-// this long, so the turn feels like a conversation rather than a wait.
+// While the agent works, the voice mentions its new activity once the call has been quiet this
+// long, so waiting on it feels like a conversation.
 const QUIET_BEFORE_PROGRESS_MS = 4000;
 const PROGRESS_CHECK_MS = 1000;
-// How much of the turn the voice is reminded of each time it speaks.
-const RECENT_ACTIVITY = 8;
-const RECENT_SAID = 6;
 
-interface TurnState {
-  question: string;
+type VoiceEvent =
+  | { type: 'user'; text: string }
+  | { type: 'progress' }
+  | { type: 'answer'; markdown: string; text: string }
+  | { type: 'prompt'; text: string };
+
+/** What a listen ended with: something the user said, silence, or an event to talk about. */
+type Heard = { type: 'user'; text: string } | { type: 'silence' } | { type: 'interrupted' };
+
+interface AgentTask {
+  request: string;
   /** The agent's progress messages and steps so far, oldest first. */
   activity: string[];
-  /** What the voice said this turn. */
-  said: string[];
-  /** How much of the activity the voice has already talked about. */
-  coveredActivity: number;
-  lastSpokeAt: number;
-  isNarrating: boolean;
+  /** How much of the activity the voice has had the chance to talk about. */
+  covered: number;
 }
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+const truncate = (text: string, maxLength: number): string =>
+  text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
 
 /** Returns the message shown to the user when the voice conversation fails. */
 export const getVoiceErrorMessage = ({ code, reason }: VoiceError): string => {
@@ -125,21 +143,29 @@ export const getVoiceErrorMessage = ({ code, reason }: VoiceError): string => {
 };
 
 /**
- * One hands-free conversation loop for the page: listen, send what was said, speak the reply,
- * listen again. Kept outside React because the chat input remounts while a conversation is created.
+ * One hands-free call for the page. The voice talks with the user and hands requests to the agent,
+ * listening while the agent works and talking about its progress and answers as they come in.
+ * Kept outside React because the chat input remounts while a conversation is created.
  */
 export class VoiceSession {
   private phase: VoicePhase = 'idle';
   private readonly listeners = new Set<() => void>();
   private microphone: Microphone | undefined;
-  private turn: AbortController | undefined;
+  private session: AbortController | undefined;
+  private listening: AbortController | undefined;
+  private isUserTalking = false;
   private binding: VoiceSessionBinding | undefined;
   private unboundTimer: ReturnType<typeof setTimeout> | undefined;
-  // Rounds the user has already seen or heard; only a round created after they speak is read out.
+  private progressTimer: ReturnType<typeof setInterval> | undefined;
+  // Rounds the user has already seen or heard; only a round created for the agent's task is retold.
   private readonly handledRoundIds = new Set<string>();
   private stopThinkingSound: (() => void) | undefined;
-  private turnState: TurnState | undefined;
-  private progressTimer: ReturnType<typeof setInterval> | undefined;
+  private events: VoiceEvent[] = [];
+  private transcript: VoiceTranscriptEntry[] = [];
+  private task: AgentTask | undefined;
+  // A request made while the agent was busy, sent once it is done.
+  private pendingRequest: string | undefined;
+  private lastSpokeAt = 0;
   private readonly player = new ProviderSpeechPlayer({
     synthesize: (text, signal) =>
       this.binding?.synthesize?.(text, signal) ?? Promise.resolve(undefined),
@@ -154,6 +180,9 @@ export class VoiceSession {
 
   getPhase = (): VoicePhase => this.phase;
 
+  /** Whether the agent is working on something the voice asked it for. */
+  isAwaitingAgent = (): boolean => this.task !== undefined;
+
   bind(binding: VoiceSessionBinding): () => void {
     clearTimeout(this.unboundTimer);
     this.binding = binding;
@@ -167,198 +196,286 @@ export class VoiceSession {
   }
 
   start(): void {
-    if (this.phase !== 'idle') return;
-    void this.listen();
+    if (this.session) return;
+    const session = new AbortController();
+    this.session = session;
+    this.events = [];
+    this.transcript = [];
+    this.lastSpokeAt = Date.now();
+    this.progressTimer = setInterval(() => this.checkOnAgent(), PROGRESS_CHECK_MS);
+    void this.run(session.signal);
   }
 
   stop(): void {
-    this.turn?.abort();
-    this.turn = undefined;
+    this.session?.abort();
+    this.session = undefined;
+    this.listening = undefined;
+    clearInterval(this.progressTimer);
+    this.progressTimer = undefined;
     this.microphone?.release();
     this.microphone = undefined;
     this.player.cancel();
+    this.events = [];
+    this.pendingRequest = undefined;
+    this.setTask(undefined);
     this.setPhase('idle');
   }
 
-  /** Marks rounds that are not a reply to the message being waited on. */
+  /** Marks rounds that are not the agent's answer to the task being waited on. */
   markHandled(roundIds: readonly string[]): void {
     roundIds.forEach((roundId) => this.handledRoundIds.add(roundId));
   }
 
-  /** Whether the round is the reply to what the user just said. */
+  /** Whether the round is the agent's answer to the task being waited on. */
   isAwaitedReply(roundId: string): boolean {
-    return this.phase === 'thinking' && !this.handledRoundIds.has(roundId);
+    return this.task !== undefined && !this.handledRoundIds.has(roundId);
   }
 
-  /** Records something the agent wrote or did while the user waits; the voice talks about it. */
+  /** Records something the agent wrote or did for the task; the voice talks about it. */
   addActivity(text: string): void {
-    const state = this.turnState;
-    if (this.phase !== 'thinking' || !state || !text || state.activity.includes(text)) return;
-    state.activity.push(text);
+    const { task } = this;
+    if (!task || !text || task.activity.includes(text)) return;
+    task.activity.push(text);
   }
 
-  /**
-   * Speaks the reply to what the user just said, then listens again unless told to stop. A written
-   * answer is retold by the voice; `text` is read as is when there is no voice or it fails.
-   */
-  speakReply(
-    roundId: string,
-    { markdown, text }: { markdown?: string; text: string },
-    { thenListen }: { thenListen: boolean }
-  ): void {
+  /** Hands the agent's answer to the voice; `text` is read as is when there is no voice agent. */
+  agentAnswered(roundId: string, { markdown, text }: { markdown: string; text: string }): void {
     if (!this.isAwaitedReply(roundId)) return;
     this.handledRoundIds.add(roundId);
-    const state = this.turnState;
-    if (!markdown || !state) {
-      this.speak(text, thenListen);
-      return;
+    this.setTask(undefined);
+    this.pushEvent({ type: 'answer', markdown, text });
+  }
+
+  /** Reads out what the agent needs the user to confirm, then ends the call so they can act. */
+  agentPrompted(roundId: string, text: string): void {
+    if (!this.isAwaitedReply(roundId)) return;
+    this.handledRoundIds.add(roundId);
+    this.setTask(undefined);
+    this.pushEvent({ type: 'prompt', text });
+  }
+
+  /** Stops waiting on an agent run that ended without an answer. */
+  agentFailed(): void {
+    this.setTask(undefined);
+  }
+
+  private async run(signal: AbortSignal): Promise<void> {
+    let cue = true;
+    while (!signal.aborted) {
+      const event = this.events.shift();
+      if (event) {
+        if (event.type === 'prompt') {
+          await this.speak(event.text, signal);
+          if (!signal.aborted) this.stop();
+          return;
+        }
+        cue = (await this.respond(event, signal)) || cue;
+        continue;
+      }
+
+      // The listening cue only follows the voice, so an interrupted listen resumes quietly.
+      const heard = await this.listen(signal, cue);
+      cue = false;
+      if (signal.aborted) return;
+      if (heard.type === 'user') {
+        this.events.unshift(heard);
+      } else if (
+        heard.type === 'silence' &&
+        !this.task &&
+        !this.pendingRequest &&
+        this.events.length === 0
+      ) {
+        this.stop();
+        return;
+      }
     }
-    this.setPhase('speaking');
-    void this.narrateTurn(
-      { kind: 'answer', question: state.question, answer: markdown },
-      () => text
-    ).then((spoken) => {
-      if (this.phase !== 'speaking' || this.turnState !== state) return;
-      this.speak(spoken || text, thenListen);
-    });
   }
 
-  private speak(text: string, thenListen: boolean): void {
-    const sentences = splitSentences(text);
-    if (sentences.length === 0) {
-      this.continueOrStop(thenListen);
-      return;
-    }
-    // Queued behind any progress sentence still being spoken, so nothing is cut off mid-word.
-    this.setPhase('speaking');
-    sentences.forEach((sentence, index) => {
-      const isLast = index === sentences.length - 1;
-      this.player.speak(
-        sentence,
-        isLast
-          ? () => {
-              if (this.phase === 'speaking') this.continueOrStop(thenListen);
-            }
-          : undefined
-      );
-    });
-  }
-
-  private continueOrStop(thenListen: boolean): void {
-    if (thenListen) void this.listen();
-    else this.stop();
-  }
-
-  private async listen(): Promise<void> {
-    this.turn?.abort();
-    const turn = new AbortController();
-    this.turn = turn;
-    const { signal } = turn;
+  /** Listens until the user says something, stays silent, or an event needs talking about. */
+  private async listen(signal: AbortSignal, cue: boolean): Promise<Heard> {
+    const listening = new AbortController();
+    const stopListening = () => listening.abort();
+    signal.addEventListener('abort', stopListening);
+    this.listening = listening;
+    this.isUserTalking = false;
     this.setPhase('listening');
+    try {
+      return await this.hear(signal, listening.signal, cue);
+    } finally {
+      signal.removeEventListener('abort', stopListening);
+      this.isUserTalking = false;
+      if (this.listening === listening) this.listening = undefined;
+    }
+  }
 
+  private async hear(signal: AbortSignal, listening: AbortSignal, cue: boolean): Promise<Heard> {
     let microphone = this.microphone;
     try {
       microphone ??= await openMicrophone();
     } catch (error) {
       this.fail(signal, toMicrophoneError(error));
-      return;
+      return { type: 'silence' };
     }
     if (signal.aborted) {
       if (microphone !== this.microphone) microphone.release();
-      return;
+      return { type: 'silence' };
     }
     this.microphone = microphone;
 
-    playListeningCue();
-    await wait(LISTENING_CUE_MS);
-    if (signal.aborted) return;
-
-    const recording = await recordUtterance(microphone, signal);
-    if (signal.aborted) return;
-    if (!recording || !this.binding) {
-      this.stop();
-      return;
+    if (cue) {
+      playListeningCue();
+      await wait(LISTENING_CUE_MS);
     }
+    if (listening.aborted) return { type: 'interrupted' };
+
+    const recording = await recordUtterance(microphone, listening, () => {
+      this.isUserTalking = true;
+    });
+    if (listening.aborted) return { type: 'interrupted' };
+    if (!recording || !this.binding) return { type: 'silence' };
 
     playHeardCue();
     this.setPhase('transcribing');
-    let transcript: string;
+    this.stopThinkingSound ??= startThinkingSound(() => this.player.isSpeaking());
+    let text: string;
     try {
-      transcript = await this.binding.transcribe(await toTranscriptionAudio(recording), signal);
+      text = await this.binding.transcribe(await toTranscriptionAudio(recording), signal);
     } catch (error) {
       this.fail(signal, { code: 'transcription-failed', reason: getErrorReason(error) });
-      return;
+      return { type: 'silence' };
     }
-    if (signal.aborted) return;
-    if (!transcript || !this.binding) {
-      this.stop();
-      return;
-    }
-
-    this.setPhase('thinking');
-    const state: TurnState = {
-      question: transcript,
-      activity: [],
-      said: [],
-      coveredActivity: 0,
-      lastSpokeAt: Date.now(),
-      isNarrating: false,
-    };
-    this.turnState = state;
-    if (!this.binding.send(transcript)) {
-      this.stop();
-      return;
-    }
-    this.progressTimer = setInterval(() => this.talkAboutProgress(state), PROGRESS_CHECK_MS);
-    void this.say(state, { kind: 'start', question: transcript }, () => '');
+    return text ? { type: 'user', text } : { type: 'silence' };
   }
 
-  private talkAboutProgress(state: TurnState): void {
-    if (this.player.isSpeaking()) {
-      state.lastSpokeAt = Date.now();
+  /** Lets the voice respond to an event, returning whether it said anything. */
+  private async respond(
+    event: Exclude<VoiceEvent, { type: 'prompt' }>,
+    signal: AbortSignal
+  ): Promise<boolean> {
+    if (event.type === 'user') {
+      this.addToTranscript({ speaker: 'user', text: event.text });
+      this.stopThinkingSound ??= startThinkingSound(() => this.player.isSpeaking());
+    }
+    if (event.type === 'progress' && this.task) this.task.covered = this.task.activity.length;
+    this.setPhase('thinking');
+
+    const { say, askAgent } = await this.converse(event, signal);
+    if (signal.aborted) return false;
+    if (event.type === 'answer') {
+      this.addToTranscript({
+        speaker: 'agent',
+        text: truncate(event.markdown, MAX_VOICE_TEXT_LENGTH),
+      });
+    }
+    if (askAgent) this.askAgent(askAgent);
+    if (!say) return false;
+    this.addToTranscript({ speaker: 'voice', text: say });
+    await this.speak(say, signal);
+    return true;
+  }
+
+  private async converse(
+    event: Exclude<VoiceEvent, { type: 'prompt' }>,
+    signal: AbortSignal
+  ): Promise<VoiceConverseResponse> {
+    const fallback = (): VoiceConverseResponse => {
+      switch (event.type) {
+        case 'user':
+          return { say: '', askAgent: event.text };
+        case 'progress':
+          return { say: this.task?.activity.at(-1) ?? '' };
+        case 'answer':
+          return { say: event.text };
+      }
+    };
+    const converse = this.binding?.converse;
+    if (!converse) return fallback();
+    const { task } = this;
+    try {
+      return await converse(
+        {
+          trigger: event.type,
+          transcript: this.transcript,
+          agent: task
+            ? {
+                status: 'working',
+                task: truncate(task.request, MAX_VOICE_TEXT_LENGTH),
+                activity: task.activity
+                  .slice(-MAX_VOICE_ACTIVITY_ITEMS)
+                  .map((item) => truncate(item, MAX_VOICE_TEXT_LENGTH)),
+              }
+            : { status: 'idle' },
+          ...(event.type === 'answer'
+            ? { answer: truncate(event.markdown, MAX_VOICE_ANSWER_LENGTH) }
+            : {}),
+        },
+        signal
+      );
+    } catch {
+      return signal.aborted ? { say: '' } : fallback();
+    }
+  }
+
+  /** Hands a request to the agent now, or once it finishes what it is working on. */
+  private askAgent(request: string): void {
+    if (this.task) {
+      this.pendingRequest = request;
       return;
     }
-    if (state.isNarrating || state.activity.length <= state.coveredActivity) return;
-    if (Date.now() - state.lastSpokeAt < QUIET_BEFORE_PROGRESS_MS) return;
-    const covered = state.activity.length;
-    void this.say(
-      state,
-      {
-        kind: 'progress',
-        question: state.question,
-        activity: state.activity.slice(-RECENT_ACTIVITY),
-        said: state.said.slice(-RECENT_SAID),
-      },
-      () => state.activity[covered - 1]
-    ).then(() => {
-      state.coveredActivity = covered;
+    this.pendingRequest = undefined;
+    this.setTask({ request, activity: [], covered: 0 });
+    if (!this.binding?.send(request)) this.setTask(undefined);
+  }
+
+  /** Speaks text sentence by sentence, resolving once it has been heard or the call ends. */
+  private speak(text: string, signal: AbortSignal): Promise<void> {
+    const sentences = splitSentences(text);
+    if (sentences.length === 0 || signal.aborted) return Promise.resolve();
+    this.setPhase('speaking');
+    return new Promise((resolve) => {
+      const done = () => {
+        signal.removeEventListener('abort', done);
+        this.lastSpokeAt = Date.now();
+        resolve();
+      };
+      signal.addEventListener('abort', done);
+      sentences.forEach((sentence, index) =>
+        this.player.speak(sentence, index === sentences.length - 1 ? done : undefined)
+      );
     });
   }
 
-  /** Asks the voice what to say while the agent works, and says it if the agent is still working. */
-  private async say(
-    state: TurnState,
-    request: NarrateRequestBody,
-    fallback: () => string
-  ): Promise<void> {
-    state.isNarrating = true;
-    const text = await this.narrateTurn(request, fallback);
-    state.isNarrating = false;
-    if (this.turnState !== state || this.phase !== 'thinking' || !text) return;
-    state.said.push(text);
-    state.lastSpokeAt = Date.now();
-    this.player.speak(text);
+  /** Lets the voice talk about the agent's progress during a quiet moment, and sends what's queued. */
+  private checkOnAgent(): void {
+    const { task } = this;
+    if (!task) {
+      if (this.pendingRequest && this.phase === 'listening' && !this.isUserTalking) {
+        this.askAgent(this.pendingRequest);
+      }
+      return;
+    }
+    if (this.phase !== 'listening' || this.isUserTalking) return;
+    if (task.activity.length <= task.covered) return;
+    if (Date.now() - this.lastSpokeAt < QUIET_BEFORE_PROGRESS_MS) return;
+    if (this.events.some(({ type }) => type === 'progress')) return;
+    this.pushEvent({ type: 'progress' });
   }
 
-  private async narrateTurn(request: NarrateRequestBody, fallback: () => string): Promise<string> {
-    const narrate = this.binding?.narrate;
-    const signal = this.turn?.signal;
-    if (!narrate || !signal) return fallback();
-    try {
-      return await narrate(request, signal);
-    } catch {
-      return signal.aborted ? '' : fallback();
-    }
+  private pushEvent(event: VoiceEvent): void {
+    if (!this.session) return;
+    this.events.push(event);
+    if (!this.isUserTalking) this.listening?.abort();
+  }
+
+  private addToTranscript(entry: VoiceTranscriptEntry): void {
+    this.transcript = [...this.transcript, entry].slice(-MAX_VOICE_TRANSCRIPT_ENTRIES);
+  }
+
+  private setTask(task: AgentTask | undefined): void {
+    if (this.task === task) return;
+    const wasAwaiting = this.task !== undefined;
+    this.task = task;
+    if (wasAwaiting !== (task !== undefined)) this.notify();
   }
 
   private fail(signal: AbortSignal, error: VoiceError): void {
@@ -370,16 +487,14 @@ export class VoiceSession {
   private setPhase(phase: VoicePhase): void {
     if (this.phase === phase) return;
     this.phase = phase;
-    if (phase === 'transcribing' || phase === 'thinking') {
-      this.stopThinkingSound ??= startThinkingSound(() => this.player.isSpeaking());
-    } else {
+    if (phase !== 'transcribing' && phase !== 'thinking') {
       this.stopThinkingSound?.();
       this.stopThinkingSound = undefined;
     }
-    if (phase !== 'thinking') {
-      clearInterval(this.progressTimer);
-      this.progressTimer = undefined;
-    }
+    this.notify();
+  }
+
+  private notify(): void {
     this.listeners.forEach((listener) => listener());
   }
 }

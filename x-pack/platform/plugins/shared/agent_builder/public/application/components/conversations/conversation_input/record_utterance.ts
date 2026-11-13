@@ -46,11 +46,12 @@ const getLevel = (analyser: AnalyserNode, samples: Float32Array<ArrayBuffer>): n
 
 /**
  * Records one thing the user says, ending after a pause. Resolves `undefined` when the user
- * stays silent or the recording is aborted.
+ * stays silent or the recording is aborted. `onSpeechStart` is called once they start talking.
  */
 export const recordUtterance = (
   { stream, analyser }: Microphone,
-  signal: AbortSignal
+  signal: AbortSignal,
+  onSpeechStart?: () => void
 ): Promise<Blob | undefined> =>
   new Promise((resolve) => {
     const recorder = new MediaRecorder(stream);
@@ -76,7 +77,10 @@ export const recordUtterance = (
     const pollId = setInterval(() => {
       const now = Date.now();
       if (getLevel(analyser, samples) > SPEECH_LEVEL) {
-        speechStartedAt ??= now;
+        if (speechStartedAt === undefined) {
+          speechStartedAt = now;
+          onSpeechStart?.();
+        }
         lastSpeechAt = now;
       }
       if (speechStartedAt === undefined) {

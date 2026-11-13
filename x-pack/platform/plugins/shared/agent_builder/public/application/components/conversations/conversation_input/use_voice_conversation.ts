@@ -16,7 +16,10 @@ import {
 import { useLiveEvents } from '../../../hooks/use_live_events';
 import type { TimelineDisplayEvent } from '../../../../services/events';
 import { toPromptSpeechText, toSpeechText, toStepSpeechText } from './to_speech_text';
-import type { NarrateRequestBody } from '../../../../../common/http_api/voice';
+import type {
+  VoiceConverseRequestBody,
+  VoiceConverseResponse,
+} from '../../../../../common/http_api/voice';
 import type { SynthesizeSpeech } from './speech_player';
 import type { VoiceError, VoicePhase } from './voice_session';
 import { isVoiceConversationSupported, voiceSession } from './voice_session';
@@ -34,7 +37,10 @@ interface UseVoiceConversationOptions {
   isResponseLoading: boolean;
   transcribe: (audio: string, signal: AbortSignal) => Promise<string>;
   synthesize: SynthesizeSpeech;
-  narrate: (request: NarrateRequestBody, signal: AbortSignal) => Promise<string>;
+  converse: (
+    request: VoiceConverseRequestBody,
+    signal: AbortSignal
+  ) => Promise<VoiceConverseResponse>;
   send: (message: string) => boolean;
   onError: (error: VoiceError) => void;
   onNoReply: () => void;
@@ -47,7 +53,7 @@ interface UseVoiceConversation {
   stop: () => void;
 }
 
-/** Hands-free chat: sends what the user says and reads the agent's reply aloud. */
+/** Hands-free call: a voice talks with the user and hands requests to the agent. */
 export const useVoiceConversation = ({
   enabled,
   conversationId,
@@ -55,25 +61,29 @@ export const useVoiceConversation = ({
   isResponseLoading,
   transcribe,
   synthesize,
-  narrate,
+  converse,
   send,
   onError,
   onNoReply,
 }: UseVoiceConversationOptions): UseVoiceConversation => {
   const isAvailable = useMemo(() => enabled && isVoiceConversationSupported(), [enabled]);
   const phase = useSyncExternalStore(voiceSession.subscribe, voiceSession.getPhase);
+  const isAwaitingAgent = useSyncExternalStore(
+    voiceSession.subscribe,
+    voiceSession.isAwaitingAgent
+  );
   const roundIds = useMemo(() => rounds?.map(({ id }) => id) ?? [], [rounds]);
   const roundIdsRef = useRef(roundIds);
   roundIdsRef.current = roundIds;
-  const callbacksRef = useRef({ transcribe, synthesize, narrate, send, onError, onNoReply });
-  callbacksRef.current = { transcribe, synthesize, narrate, send, onError, onNoReply };
+  const callbacksRef = useRef({ transcribe, synthesize, converse, send, onError, onNoReply });
+  callbacksRef.current = { transcribe, synthesize, converse, send, onError, onNoReply };
 
   useEffect(() => {
     if (!isAvailable) return;
     return voiceSession.bind({
       transcribe: (audio, signal) => callbacksRef.current.transcribe(audio, signal),
       synthesize: (text, signal) => callbacksRef.current.synthesize(text, signal),
-      narrate: (request, signal) => callbacksRef.current.narrate(request, signal),
+      converse: (request, signal) => callbacksRef.current.converse(request, signal),
       send: (message) => {
         voiceSession.markHandled(roundIdsRef.current);
         return callbacksRef.current.send(message);
@@ -82,11 +92,11 @@ export const useVoiceConversation = ({
     });
   }, [isAvailable]);
 
-  // Replies that finished while the user wasn't waiting on one (the session was off, or they were
-  // listening or speaking) are on screen already, so they are never read out later.
+  // Replies that finished while the voice wasn't waiting on the agent are on screen already, so
+  // they are never retold later.
   useEffect(() => {
-    if (phase !== 'thinking') voiceSession.markHandled(roundIds);
-  }, [phase, roundIds]);
+    if (!isAwaitingAgent) voiceSession.markHandled(roundIds);
+  }, [isAwaitingAgent, roundIds]);
 
   // Switching to another conversation ends the session, so its rounds are never mistaken for the
   // reply. Creating a conversation (no id yet, then an id) keeps it going.
@@ -97,13 +107,13 @@ export const useVoiceConversation = ({
     if (previousId && previousId !== conversationId) voiceSession.stop();
   }, [conversationId]);
 
-  // Reads out the agent's progress messages streamed for the current run. Steps already
-  // streamed before the user spoke belong to an earlier run.
+  // Feeds the voice the agent's progress messages and steps for the current run. Steps already
+  // streamed before the voice asked belong to an earlier run.
   const liveEvents = useLiveEvents();
   const earlierStepIdsRef = useRef(new Set<string>());
   useEffect(() => {
     const stepEvents = liveEvents.filter(isStepEvent);
-    if (phase !== 'thinking') {
+    if (!isAwaitingAgent) {
       stepEvents.forEach(({ id }) => earlierStepIdsRef.current.add(id));
       return;
     }
@@ -117,39 +127,34 @@ export const useVoiceConversation = ({
           voiceSession.addActivity(toStepSpeechText(step.intent));
         }
       });
-  }, [isAvailable, phase, liveEvents]);
+  }, [isAvailable, isAwaitingAgent, liveEvents]);
 
   useEffect(() => {
-    if (!isAvailable || phase !== 'thinking' || isResponseLoading) return;
+    if (!isAvailable || !isAwaitingAgent || isResponseLoading) return;
 
     const lastRound = rounds?.at(-1);
     if (lastRound && voiceSession.isAwaitedReply(lastRound.id)) {
       if (lastRound.status === ConversationRoundStatus.completed) {
         const { message } = lastRound.response;
-        voiceSession.speakReply(
-          lastRound.id,
-          { markdown: message, text: toSpeechText(message) },
-          { thenListen: true }
-        );
+        voiceSession.agentAnswered(lastRound.id, {
+          markdown: message,
+          text: toSpeechText(message),
+        });
         return;
       }
       if (lastRound.status === ConversationRoundStatus.awaitingPrompt) {
-        voiceSession.speakReply(
-          lastRound.id,
-          { text: toPromptSpeechText(lastRound.pending_prompts) },
-          { thenListen: false }
-        );
+        voiceSession.agentPrompted(lastRound.id, toPromptSpeechText(lastRound.pending_prompts));
         return;
       }
     }
 
     const timeoutId = setTimeout(() => {
-      if (voiceSession.getPhase() !== 'thinking') return;
-      voiceSession.stop();
+      if (!voiceSession.isAwaitingAgent()) return;
+      voiceSession.agentFailed();
       callbacksRef.current.onNoReply();
     }, NO_REPLY_TIMEOUT_MS);
     return () => clearTimeout(timeoutId);
-  }, [isAvailable, phase, isResponseLoading, rounds]);
+  }, [isAvailable, isAwaitingAgent, isResponseLoading, rounds]);
 
   const toggle = useCallback(() => {
     if (voiceSession.getPhase() === 'idle') {

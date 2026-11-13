@@ -25,26 +25,41 @@ export interface SpeakTextRequestBody {
   text: string;
 }
 
-/** What the voice should say: an acknowledgement, a progress update or the answer itself. */
-export type NarrationKind = 'start' | 'progress' | 'answer';
+/** Why the voice agent is asked to speak: the user said something, or the assistant moved on. */
+export type VoiceTrigger = 'user' | 'progress' | 'answer';
 
-export const MAX_NARRATION_ITEMS = 20;
-export const MAX_NARRATION_ITEM_LENGTH = 1000;
-export const MAX_NARRATION_ANSWER_LENGTH = 20_000;
+export type VoiceSpeaker = 'user' | 'voice' | 'agent';
 
-export interface NarrateRequestBody {
-  kind: NarrationKind;
-  /** What the user asked. */
-  question: string;
-  /** The agent's recent progress messages and tool steps, oldest first. */
+export interface VoiceTranscriptEntry {
+  speaker: VoiceSpeaker;
+  text: string;
+}
+
+export interface VoiceAgentState {
+  status: 'idle' | 'working';
+  /** What the voice asked the assistant to do. */
+  task?: string;
+  /** The assistant's recent progress messages and steps, oldest first. */
   activity?: string[];
-  /** What the voice already said this turn, so it doesn't repeat itself. */
-  said?: string[];
-  /** The agent's written answer, for `answer`. */
+}
+
+export const MAX_VOICE_TRANSCRIPT_ENTRIES = 40;
+export const MAX_VOICE_ACTIVITY_ITEMS = 20;
+export const MAX_VOICE_TEXT_LENGTH = 4000;
+export const MAX_VOICE_ANSWER_LENGTH = 20_000;
+
+export interface VoiceConverseRequestBody {
+  trigger: VoiceTrigger;
+  /** The call so far, oldest first; for `user`, it ends with what the user just said. */
+  transcript: VoiceTranscriptEntry[];
+  agent: VoiceAgentState;
+  /** The assistant's written answer, for `answer`. */
   answer?: string;
 }
 
-export interface NarrateResponse {
-  /** What to say; empty when there is nothing new worth saying. */
-  text: string;
+export interface VoiceConverseResponse {
+  /** What to say out loud; empty to stay quiet. */
+  say: string;
+  /** A request for the assistant, when the user needs something looked up. */
+  askAgent?: string;
 }

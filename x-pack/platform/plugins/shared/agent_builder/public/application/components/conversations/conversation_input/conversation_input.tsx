@@ -25,7 +25,7 @@ import {
   formatAgentBuilderErrorMessage,
 } from '@kbn/agent-builder-browser';
 import { KbnInfoCallout } from '@kbn/ui-callout';
-import type { NarrateRequestBody } from '../../../../../common/http_api/voice';
+import type { VoiceConverseRequestBody } from '../../../../../common/http_api/voice';
 import { useConversationId } from '../../../context/conversation/use_conversation_id';
 import { useConversationStream } from '../../../hooks/use_conversation_stream';
 import { useCurrentUser } from '../../../hooks/use_current_user';
@@ -504,9 +504,9 @@ const ConversationInputComponent: React.FC<ConversationInputProps> = ({
     (text: string, signal: AbortSignal) => conversationsService.synthesizeSpeech({ text, signal }),
     [conversationsService]
   );
-  const narrateVoice = useCallback(
-    async (request: NarrateRequestBody, signal: AbortSignal) =>
-      (await conversationsService.narrate({ ...request, signal })).text,
+  const converseVoice = useCallback(
+    (request: VoiceConverseRequestBody, signal: AbortSignal) =>
+      conversationsService.converseVoice({ ...request, signal }),
     [conversationsService]
   );
   const handleVoiceError = useCallback(
@@ -528,7 +528,7 @@ const ConversationInputComponent: React.FC<ConversationInputProps> = ({
     isResponseLoading,
     transcribe: transcribeSpeech,
     synthesize: synthesizeSpeech,
-    narrate: narrateVoice,
+    converse: converseVoice,
     send: sendSpokenMessage,
     onError: handleVoiceError,
     onNoReply: handleNoVoiceReply,

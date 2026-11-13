@@ -23,8 +23,8 @@ import type {
 } from '../../../common/http_api/conversations';
 import type { ReadWorkspaceFileResponse } from '../../../common/http_api/workspace_files';
 import type {
-  NarrateRequestBody,
-  NarrateResponse,
+  VoiceConverseRequestBody,
+  VoiceConverseResponse,
   SpeakTextRequestBody,
   TranscribeAudioRequestBody,
   TranscribeAudioResponse,
@@ -213,15 +213,15 @@ export class ConversationsService {
     );
   }
 
-  /** Asks the voice what to say about the agent's work so far. */
-  async narrate({
+  /** Asks the voice agent what to say on the call, and what to hand to the agent behind it. */
+  async converseVoice({
     signal,
     ...body
-  }: NarrateRequestBody & { signal?: AbortSignal }): Promise<NarrateResponse> {
-    return await this.http.post<NarrateResponse>(buildPath(`${internalApiPath}/voice/_narrate`), {
-      body: JSON.stringify(body),
-      signal,
-    });
+  }: VoiceConverseRequestBody & { signal?: AbortSignal }): Promise<VoiceConverseResponse> {
+    return await this.http.post<VoiceConverseResponse>(
+      buildPath(`${internalApiPath}/voice/_converse`),
+      { body: JSON.stringify(body), signal }
+    );
   }
 
   /** Speaks text with the configured voice provider; resolves without audio when there is none. */

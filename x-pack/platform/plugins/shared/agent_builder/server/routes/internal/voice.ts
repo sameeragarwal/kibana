@@ -12,16 +12,20 @@ import type { RouteDependencies } from '../types';
 import type { AgentBuilderConfig } from '../../config';
 import { getHandlerWrapper } from '../wrap_handler';
 import { internalApiPath } from '../../../common/constants';
-import type { NarrateResponse, TranscribeAudioResponse } from '../../../common/http_api/voice';
+import type {
+  TranscribeAudioResponse,
+  VoiceConverseResponse,
+} from '../../../common/http_api/voice';
 import {
-  MAX_NARRATION_ANSWER_LENGTH,
-  MAX_NARRATION_ITEM_LENGTH,
-  MAX_NARRATION_ITEMS,
   MAX_SPEECH_TEXT_LENGTH,
   MAX_TRANSCRIPTION_AUDIO_BASE64_LENGTH,
+  MAX_VOICE_ACTIVITY_ITEMS,
+  MAX_VOICE_ANSWER_LENGTH,
+  MAX_VOICE_TEXT_LENGTH,
+  MAX_VOICE_TRANSCRIPT_ENTRIES,
 } from '../../../common/http_api/voice';
-import type { NarrationMessage } from './voice_narration';
-import { buildNarrationMessages, toNarrationText } from './voice_narration';
+import type { VoiceAgentCompletionMessage, VoiceAgentMessage } from './voice_agent';
+import { buildVoiceAgentMessages, parseVoiceAgentReply, VOICE_AGENT_TOOLS } from './voice_agent';
 import { AGENT_BUILDER_WRITE_SECURITY } from '../route_security';
 
 /** EIS models that accept audio input, fastest first. */
@@ -32,8 +36,8 @@ const TRANSCRIPTION_MODEL_IDS: readonly string[] = [
   'google-gemini-3.8-flash',
 ];
 
-/** Fast EIS chat models for the conversational voice, preferred first. */
-const NARRATION_MODEL_IDS: readonly string[] = [
+/** Fast EIS chat models for the voice agent, preferred first. */
+const VOICE_AGENT_MODEL_IDS: readonly string[] = [
   'google-gemini-3.5-flash',
   'google-gemini-3.5-flash-lite',
   'google-gemini-3.6-flash',
@@ -47,6 +51,10 @@ const TRANSCRIPTION_PROMPT = `Transcribe only the words actually spoken in this 
 
 interface ChatCompletionResponse {
   choices?: Array<{ message?: { content?: string | null } }>;
+}
+
+interface VoiceAgentCompletion {
+  choices?: Array<{ message?: VoiceAgentCompletionMessage }>;
 }
 
 const findEisEndpoint = (
@@ -93,15 +101,19 @@ const abortWithRequest = (request: KibanaRequest): { signal: AbortSignal; releas
   return { signal: controller.signal, release: () => subscription.unsubscribe() };
 };
 
-const narrateWithOpenAi = (
+const converseWithOpenAi = (
   { apiKey, conversationModel }: OpenAiVoiceConfig,
-  messages: NarrationMessage[],
+  messages: VoiceAgentMessage[],
   signal: AbortSignal
 ): Promise<Response> =>
   fetch(OPENAI_CHAT_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: conversationModel, messages }),
+    body: JSON.stringify({
+      model: conversationModel,
+      messages,
+      tools: VOICE_AGENT_TOOLS,
+    }),
     signal,
   });
 
@@ -268,46 +280,59 @@ export function registerInternalVoiceRoutes({ router, logger, config }: RouteDep
     })
   );
 
-  const narrationItems = schema.arrayOf(schema.string({ maxLength: MAX_NARRATION_ITEM_LENGTH }), {
-    maxSize: MAX_NARRATION_ITEMS,
-  });
+  const voiceText = schema.string({ maxLength: MAX_VOICE_TEXT_LENGTH });
 
   router.post(
     {
-      path: `${internalApiPath}/voice/_narrate`,
+      path: `${internalApiPath}/voice/_converse`,
       security: AGENT_BUILDER_WRITE_SECURITY,
       options: { access: 'internal' },
       validate: {
         body: schema.object({
-          kind: schema.oneOf([
-            schema.literal('start'),
+          trigger: schema.oneOf([
+            schema.literal('user'),
             schema.literal('progress'),
             schema.literal('answer'),
           ]),
-          question: schema.string({ minLength: 1, maxLength: MAX_NARRATION_ITEM_LENGTH }),
-          activity: schema.maybe(narrationItems),
-          said: schema.maybe(narrationItems),
-          answer: schema.maybe(schema.string({ maxLength: MAX_NARRATION_ANSWER_LENGTH })),
+          transcript: schema.arrayOf(
+            schema.object({
+              speaker: schema.oneOf([
+                schema.literal('user'),
+                schema.literal('voice'),
+                schema.literal('agent'),
+              ]),
+              text: voiceText,
+            }),
+            { maxSize: MAX_VOICE_TRANSCRIPT_ENTRIES }
+          ),
+          agent: schema.object({
+            status: schema.oneOf([schema.literal('idle'), schema.literal('working')]),
+            task: schema.maybe(voiceText),
+            activity: schema.maybe(
+              schema.arrayOf(voiceText, { maxSize: MAX_VOICE_ACTIVITY_ITEMS })
+            ),
+          }),
+          answer: schema.maybe(schema.string({ maxLength: MAX_VOICE_ANSWER_LENGTH })),
         }),
       },
     },
     wrapHandler(async (context, request, response) => {
-      const messages = buildNarrationMessages(request.body);
+      const messages = buildVoiceAgentMessages(request.body);
       const openai = getOpenAiVoice(config);
       const { signal, release } = abortWithRequest(request);
       try {
         if (openai) {
-          const completion = await narrateWithOpenAi(openai, messages, signal);
+          const completion = await converseWithOpenAi(openai, messages, signal);
           if (!completion.ok) {
-            logger.warn(`OpenAI narration failed with status ${completion.status}`);
+            logger.warn(`OpenAI voice agent failed with status ${completion.status}`);
             return response.customError({
               statusCode: 502,
-              body: { message: `Narration failed with status ${completion.status}` },
+              body: { message: `The voice agent failed with status ${completion.status}` },
             });
           }
-          const { choices } = (await completion.json()) as ChatCompletionResponse;
-          return response.ok<NarrateResponse>({
-            body: { text: toNarrationText(choices?.[0]?.message?.content) },
+          const { choices } = (await completion.json()) as VoiceAgentCompletion;
+          return response.ok<VoiceConverseResponse>({
+            body: parseVoiceAgentReply(choices?.[0]?.message),
           });
         }
 
@@ -317,22 +342,24 @@ export function registerInternalVoiceRoutes({ router, logger, config }: RouteDep
           task_type: 'chat_completion',
           inference_id: '_all',
         });
-        const inferenceId = findEisEndpoint(endpoints, NARRATION_MODEL_IDS);
+        const inferenceId = findEisEndpoint(endpoints, VOICE_AGENT_MODEL_IDS);
         if (!inferenceId) {
           return response.notFound({
-            body: { message: 'No Elastic Inference Service model is available for narration.' },
+            body: {
+              message: 'No Elastic Inference Service model is available for the voice agent.',
+            },
           });
         }
-        const { choices } = await esClient.transport.request<ChatCompletionResponse>(
+        const { choices } = await esClient.transport.request<VoiceAgentCompletion>(
           {
             method: 'POST',
             path: `/_inference/chat_completion/${encodeURIComponent(inferenceId)}`,
-            body: { messages },
+            body: { messages, tools: VOICE_AGENT_TOOLS },
           },
           { headers: { 'X-Elastic-Product-Use-Case': 'agent_builder_voice' }, signal }
         );
-        return response.ok<NarrateResponse>({
-          body: { text: toNarrationText(choices?.[0]?.message?.content) },
+        return response.ok<VoiceConverseResponse>({
+          body: parseVoiceAgentReply(choices?.[0]?.message),
         });
       } finally {
         release();
